@@ -1,0 +1,23 @@
+{
+  "incident_id": "INC-002",
+  "title": "Inventory Service Out-Of-Memory Crash",
+  "description": "Inventory service pod crashed repeatedly with OOMKilled exit code 137 under sustained batch indexing queries.",
+  "services_involved": [
+    "inventory-service",
+    "k8s-node-worker-04"
+  ],
+  "start_time": "2026-08-30T10:15:00Z",
+  "end_time": "2026-08-30T10:40:00Z",
+  "log_files": [
+    "incident_002_sys.log"
+  ],
+  "symptoms": [
+    "Pod restart count incrementing rapidly",
+    "503 Service Unavailable returned by load balancer",
+    "Container killed with exit code 137"
+  ],
+  "metadata": {
+    "environment": "production",
+    "cluster": "k8s-us-west-2"
+  }
+}

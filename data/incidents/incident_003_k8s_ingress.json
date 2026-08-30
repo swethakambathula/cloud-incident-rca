@@ -1,0 +1,21 @@
+{
+  "incident_id": "INC-003",
+  "title": "Ingress Gateway Downstream Read Timeout",
+  "description": "Nginx ingress controller dropped client connections due to upstream timeout limits exceeded on user auth service.",
+  "services_involved": [
+    "ingress-nginx",
+    "user-auth-service"
+  ],
+  "start_time": "2026-08-30T12:00:00Z",
+  "end_time": "2026-08-30T12:15:00Z",
+  "log_files": [
+    "incident_003_k8s.log"
+  ],
+  "symptoms": [
+    "HTTP 504 Gateway Timeout on user login",
+    "High upstream latency metrics on ingress dashboard"
+  ],
+  "metadata": {
+    "environment": "staging"
+  }
+}

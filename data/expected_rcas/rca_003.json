@@ -1,0 +1,10 @@
+{
+  "incident_id": "INC-003",
+  "root_cause_component": "ingress-nginx",
+  "expected_keywords": [
+    "gateway timeout",
+    "upstream",
+    "latency"
+  ],
+  "min_confidence": 0.80
+}

@@ -1,0 +1,11 @@
+{
+  "incident_id": "INC-002",
+  "root_cause_component": "inventory-service",
+  "expected_keywords": [
+    "memory",
+    "oomkilled",
+    "heap",
+    "leak"
+  ],
+  "min_confidence": 0.85
+}

@@ -1,0 +1,25 @@
+{
+  "incident_id": "INC-001",
+  "title": "Payment Gateway 504 Gateway Timeout Cascade",
+  "description": "Production payment API began returning HTTP 504 Gateway Timeout errors to downstream clients during peak traffic load.",
+  "services_involved": [
+    "payment-api",
+    "postgresql-cluster",
+    "api-gateway"
+  ],
+  "start_time": "2026-08-30T14:00:00Z",
+  "end_time": "2026-08-30T14:25:00Z",
+  "log_files": [
+    "incident_001_app.log"
+  ],
+  "symptoms": [
+    "HTTP 504 Gateway Timeout on /v1/charge",
+    "Spike in HTTP 5xx responses at API Gateway",
+    "Payment API worker thread pool saturation"
+  ],
+  "metadata": {
+    "environment": "production",
+    "cloud_provider": "AWS",
+    "region": "us-east-1"
+  }
+}

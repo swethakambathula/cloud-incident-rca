@@ -1,0 +1,11 @@
+{
+  "incident_id": "INC-001",
+  "root_cause_component": "postgresql-cluster",
+  "expected_keywords": [
+    "connection pool",
+    "exhausted",
+    "timeout",
+    "database"
+  ],
+  "min_confidence": 0.85
+}

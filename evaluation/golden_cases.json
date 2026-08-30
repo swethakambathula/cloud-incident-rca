@@ -1,0 +1,23 @@
+[
+  {
+    "incident_id": "INC-001",
+    "incident_file": "data/incidents/incident_001_db_pool.json",
+    "expected_component": "payment-api",
+    "expected_keywords": ["connection pool", "hikari", "exhausted", "timeout"],
+    "min_confidence": 0.85
+  },
+  {
+    "incident_id": "INC-002",
+    "incident_file": "data/incidents/incident_002_oom_leak.json",
+    "expected_component": "inventory-service",
+    "expected_keywords": ["memory", "oomkilled", "heap"],
+    "min_confidence": 0.85
+  },
+  {
+    "incident_id": "INC-003",
+    "incident_file": "data/incidents/incident_003_k8s_ingress.json",
+    "expected_component": "ingress-nginx",
+    "expected_keywords": ["gateway timeout", "upstream"],
+    "min_confidence": 0.80
+  }
+]
