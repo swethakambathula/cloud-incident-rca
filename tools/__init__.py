@@ -1,7 +1,4 @@
 """
 RCA Tooling Package
 """
-from .log_parser import LogParser
-from .evidence_extractor import EvidenceExtractor
-
-__all__ = ["LogParser", "EvidenceExtractor"]
+__all__ = ["LogParser", "EvidenceExtractor", "get_error_logs"]

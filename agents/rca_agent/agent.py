@@ -5,8 +5,6 @@ import os
 import json
 from typing import List, Dict, Any, Optional
 from .schemas import IncidentContext, RCAResult, EvidenceItem, TimelineEvent, RemediationStep
-from tools.log_parser import LogParser
-from tools.evidence_extractor import EvidenceExtractor
 from .prompts import RCA_SYSTEM_PROMPT, RCA_ANALYSIS_PROMPT_TEMPLATE
 
 
@@ -18,6 +16,9 @@ class CloudRCAAgent:
 
     def analyze_incident(self, incident_file: str) -> RCAResult:
         """Loads incident metadata & logs, parses evidence, and generates full RCA report."""
+        from tools.log_parser import LogParser
+        from tools.evidence_extractor import EvidenceExtractor
+
         with open(incident_file, 'r', encoding='utf-8') as f:
             incident_dict = json.load(f)
 
