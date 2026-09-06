@@ -1,0 +1,26 @@
+{
+  "incident_id": "INC-003-BAD-DEPLOYMENT",
+  "root_cause": "Faulty application revision checkout-service-00005-bad deployed 2 minutes prior containing a regression triggering NullPointerException",
+  "root_cause_category": "faulty_revision",
+  "confidence_score": 0.98,
+  "evidence": [
+    "New revision checkout-service-00005-bad deployed at 14:58:00Z with 100% traffic shift",
+    "310 NullPointerException application errors occurred exclusively on revision checkout-service-00005-bad",
+    "Error rate spiked to 34.1% immediately following revision cutover while previous revision had 0% error rate"
+  ],
+  "contradictory_evidence": [
+    "Previous revision checkout-service-00004-v1 was completely healthy prior to rollout",
+    "Dependencies including orders-db are healthy with 0 reported timeouts",
+    "CPU (21%) and Memory (36%) are normal and stable, eliminating resource limits"
+  ],
+  "affected_services": [
+    "checkout-service"
+  ],
+  "blast_radius": "Scope: service-wide affecting checkout-service on /checkout. Region: regional (us-central1). Active revision: checkout-service-00005-bad.",
+  "recommended_action": "Roll back Cloud Run traffic immediately to known-good revision checkout-service-00004-v1",
+  "remediation_risk": "LOW",
+  "additional_checks_required": [
+    "Inspect git commit diff between revisions checkout-service-00004-v1 and checkout-service-00005-bad",
+    "Verify pre-deployment integration tests in CI/CD pipeline"
+  ]
+}

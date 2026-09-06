@@ -1,0 +1,26 @@
+{
+  "incident_id": "INC-001-DB-TIMEOUT",
+  "root_cause": "Database connectivity failure caused by unreachable orders-db leading to connection timeouts",
+  "root_cause_category": "database_connectivity",
+  "confidence_score": 0.95,
+  "evidence": [
+    "148 DATABASE_CONNECTION_TIMEOUT errors logged with dependency=orders-db",
+    "Distributed trace trace-db-timeout-901 indicates database call timed out after 5000ms deadline exceeded",
+    "HTTP 500 error rate spiked to 24.2% on /simulate/error endpoint"
+  ],
+  "contradictory_evidence": [
+    "CPU utilization remained normal at 24.0% ruling out CPU exhaustion",
+    "Memory utilization remained stable at 39.5% ruling out out-of-memory crash",
+    "No new revision deployed prior to the incident (revision deployed 4+ hours earlier)"
+  ],
+  "affected_services": [
+    "checkout-service"
+  ],
+  "blast_radius": "Scope: service-wide affecting checkout-service on /simulate/error. Region: regional (us-central1).",
+  "recommended_action": "Check network connectivity, VPC connector status, and health of the orders-db database instance",
+  "remediation_risk": "LOW",
+  "additional_checks_required": [
+    "Verify Cloud SQL or external database instance CPU and storage metrics",
+    "Inspect VPC firewall rules and Serverless VPC Access connector health"
+  ]
+}

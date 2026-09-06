@@ -1,0 +1,25 @@
+{
+  "incident_id": "INC-006-CONFIG-REGRESSION",
+  "root_cause": "Configuration regression where revision checkout-service-00006-cfg omitted required environment variable PAYMENT_GATEWAY_API_KEY causing /simulate/config-error to fail",
+  "root_cause_category": "configuration_regression",
+  "confidence_score": 0.96,
+  "evidence": [
+    "76 CONFIGURATION_REGRESSION error logs indicating 'PAYMENT_GATEWAY_API_KEY' is missing or empty",
+    "Recent configuration update deployed in revision checkout-service-00006-cfg 5 minutes prior to first error",
+    "Isolated failure on endpoint /simulate/config-error while /health and main application succeed"
+  ],
+  "contradictory_evidence": [
+    "Overall service health and container startup probes succeed",
+    "CPU (19%), Memory (35%), and latency (165ms) are completely normal, ruling out resource or infrastructure problems"
+  ],
+  "affected_services": [
+    "checkout-service"
+  ],
+  "blast_radius": "Scope: endpoint-isolated affecting checkout-service on /simulate/config-error. Region: regional (us-central1). Active revision: checkout-service-00006-cfg.",
+  "recommended_action": "Set the missing environment variable PAYMENT_GATEWAY_API_KEY in Cloud Run service configuration or Secret Manager and deploy update",
+  "remediation_risk": "LOW",
+  "additional_checks_required": [
+    "Check Secret Manager access permissions for Cloud Run service account",
+    "Review Secret and environment variable configuration in revision checkout-service-00006-cfg"
+  ]
+}

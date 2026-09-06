@@ -1,0 +1,25 @@
+{
+  "incident_id": "INC-005-TRAFFIC-OVERLOAD",
+  "root_cause": "Insufficient capacity / traffic overload caused by a 450% surge in request volume exceeding Cloud Run max instances and saturating CPU at 96%",
+  "root_cause_category": "traffic_overload",
+  "confidence_score": 0.97,
+  "evidence": [
+    "Incoming request count increased from 600 rpm to 3300 rpm (450% spike)",
+    "CPU utilization spiked to 96% and memory climbed to 88%",
+    "480 REQUEST_QUEUE_FULL_THROTTLED logs indicating maximum instance limit reached with concurrent requests overflowing"
+  ],
+  "contradictory_evidence": [
+    "No code changes or revisions deployed prior to spike",
+    "Failures span all endpoints rather than an isolated buggy endpoint"
+  ],
+  "affected_services": [
+    "checkout-service"
+  ],
+  "blast_radius": "Scope: service-wide affecting checkout-service across all endpoints. Region: regional (us-central1).",
+  "recommended_action": "Temporarily increase Cloud Run max-instances scaling ceiling and enforce rate limiting or Cloud Armor throttling at the edge",
+  "remediation_risk": "LOW",
+  "additional_checks_required": [
+    "Inspect incoming IP addresses and user agents in Cloud Run request logs for DDoS or crawler behavior",
+    "Evaluate Cloud Run autoscaling target concurrency settings"
+  ]
+}

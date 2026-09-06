@@ -1,0 +1,87 @@
+{
+  "incident_id": "INC-006-CONFIG-REGRESSION",
+  "start_time": "2026-09-05T16:30:00Z",
+  "end_time": "2026-09-05T16:45:00Z",
+  "project_id": "cloud-incident-prod",
+  "service_name": "checkout-service",
+  "revision_name": "checkout-service-00006-cfg",
+  "region": "us-central1",
+  "severity": "P3",
+  "symptoms": [
+    "Service container starts successfully and passes /health probes",
+    "Only specific endpoint /simulate/config-error fails with missing environment variable",
+    "Recent environment configuration change occurred 5 minutes before failure"
+  ],
+  "application_errors": [
+    {
+      "error_code": "CONFIGURATION_REGRESSION",
+      "endpoint": "/simulate/config-error",
+      "count": 76,
+      "sample_message": "CONFIGURATION_REGRESSION: Required environment variable 'PAYMENT_GATEWAY_API_KEY' is missing or empty"
+    }
+  ],
+  "request_errors": [
+    {
+      "endpoint": "/simulate/config-error",
+      "status_code": 500,
+      "count": 76
+    }
+  ],
+  "latency": {
+    "baseline_p95_ms": 150.0,
+    "incident_p95_ms": 165.0,
+    "percentage_change": 10.0,
+    "severity": "NORMAL"
+  },
+  "request_count": {
+    "baseline_rpm": 400.0,
+    "incident_rpm": 402.0,
+    "error_rate_pct": 3.2,
+    "severity": "WARNING"
+  },
+  "cpu_utilization": {
+    "baseline_pct": 18.0,
+    "incident_pct": 19.0,
+    "percentage_change": 5.56,
+    "severity": "NORMAL"
+  },
+  "memory_utilization": {
+    "baseline_pct": 34.0,
+    "incident_pct": 35.0,
+    "percentage_change": 2.94,
+    "severity": "NORMAL"
+  },
+  "recent_deployments": [
+    {
+      "revision_name": "checkout-service-00006-cfg",
+      "deployed_at": "2026-09-05T16:25:00Z",
+      "traffic_percent": 100,
+      "config_changes": {
+        "env_vars_updated": ["PAYMENT_GATEWAY_API_KEY", "FEATURE_FLAG_NEW_BILLING"]
+      }
+    }
+  ],
+  "dependencies": [],
+  "traces": [
+    {
+      "trace_id": "trace-cfg-error-606",
+      "root_span": "/simulate/config-error",
+      "status": "INTERNAL_ERROR",
+      "message": "KeyError: PAYMENT_GATEWAY_API_KEY"
+    }
+  ],
+  "blast_radius": {
+    "affected_services": ["checkout-service"],
+    "affected_endpoints": ["/simulate/config-error"],
+    "affected_revision": "checkout-service-00006-cfg",
+    "scope": "endpoint-isolated",
+    "regional_scope": "regional (us-central1)"
+  },
+  "raw_evidence": [
+    {
+      "timestamp": "2026-09-05T16:30:12Z",
+      "source": "logging",
+      "log": "ERROR: CONFIGURATION_REGRESSION: Required environment variable 'PAYMENT_GATEWAY_API_KEY' is missing or empty"
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "incident_id": "INC-004-DEPENDENCY-OUTAGE",
+  "start_time": "2026-09-05T15:30:00Z",
+  "end_time": "2026-09-05T15:45:00Z",
+  "project_id": "cloud-incident-prod",
+  "service_name": "checkout-service",
+  "revision_name": "checkout-service-00004-v1",
+  "region": "us-central1",
+  "severity": "P2",
+  "symptoms": [
+    "checkout-service CPU and memory remain completely normal",
+    "Downstream orders-service returns HTTP 503 Service Unavailable / Connection Refused",
+    "Only endpoints requiring orders-service (/simulate/dependency-failure) are affected; other endpoints (/health) succeed"
+  ],
+  "application_errors": [
+    {
+      "error_code": "DOWNSTREAM_DEPENDENCY_FAILURE",
+      "dependency": "orders-service",
+      "count": 182,
+      "sample_message": "DOWNSTREAM_DEPENDENCY_FAILURE service=checkout-service dependency=orders-service status=503"
+    }
+  ],
+  "request_errors": [
+    {
+      "endpoint": "/simulate/dependency-failure",
+      "status_code": 502,
+      "count": 182
+    }
+  ],
+  "latency": {
+    "baseline_p95_ms": 170.0,
+    "incident_p95_ms": 1150.0,
+    "percentage_change": 576.47,
+    "severity": "WARNING"
+  },
+  "request_count": {
+    "baseline_rpm": 400.0,
+    "incident_rpm": 405.0,
+    "error_rate_pct": 11.2,
+    "severity": "CRITICAL"
+  },
+  "cpu_utilization": {
+    "baseline_pct": 21.0,
+    "incident_pct": 22.5,
+    "percentage_change": 7.14,
+    "severity": "NORMAL"
+  },
+  "memory_utilization": {
+    "baseline_pct": 36.0,
+    "incident_pct": 37.0,
+    "percentage_change": 2.78,
+    "severity": "NORMAL"
+  },
+  "recent_deployments": [],
+  "dependencies": [
+    {
+      "name": "orders-service",
+      "type": "http_service",
+      "status": "UNAVAILABLE",
+      "http_status_returned": 503,
+      "failure_rate_pct": 100.0
+    }
+  ],
+  "traces": [
+    {
+      "trace_id": "trace-dep-fail-404",
+      "root_span": "/simulate/dependency-failure",
+      "service": "checkout-service",
+      "downstream_call": "http://orders-service/orders",
+      "downstream_status": 503,
+      "duration_ms": 1120.0
+    }
+  ],
+  "blast_radius": {
+    "affected_services": ["checkout-service", "orders-service"],
+    "affected_endpoints": ["/simulate/dependency-failure"],
+    "dependencies_affected": ["orders-service"],
+    "scope": "multi-service-cascade",
+    "regional_scope": "regional (us-central1)"
+  },
+  "raw_evidence": [
+    {
+      "timestamp": "2026-09-05T15:31:10Z",
+      "source": "logging",
+      "log": "ERROR: DOWNSTREAM_DEPENDENCY_FAILURE dependency=orders-service detail='upstream connect error or disconnect/reset before headers. reset reason: connection termination'"
+    }
+  ]
+}

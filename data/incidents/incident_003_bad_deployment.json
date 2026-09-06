@@ -1,0 +1,101 @@
+{
+  "incident_id": "INC-003-BAD-DEPLOYMENT",
+  "start_time": "2026-09-05T15:00:00Z",
+  "end_time": "2026-09-05T15:15:00Z",
+  "project_id": "cloud-incident-prod",
+  "service_name": "checkout-service",
+  "revision_name": "checkout-service-00005-bad",
+  "region": "us-central1",
+  "severity": "P1",
+  "symptoms": [
+    "New Cloud Run revision deployed 2 minutes before incident start",
+    "HTTP 500 error rate surged immediately following traffic migration to new revision",
+    "Previous revision checkout-service-00004-v1 had zero reported 5xx errors"
+  ],
+  "application_errors": [
+    {
+      "error_code": "NULL_POINTER_EXCEPTION",
+      "count": 310,
+      "revision": "checkout-service-00005-bad",
+      "sample_message": "NullPointerException in PaymentProcessor.java:84 at checkout-service-00005-bad"
+    }
+  ],
+  "request_errors": [
+    {
+      "endpoint": "/checkout",
+      "status_code": 500,
+      "count": 310
+    }
+  ],
+  "latency": {
+    "baseline_p95_ms": 160.0,
+    "incident_p95_ms": 220.0,
+    "percentage_change": 37.5,
+    "severity": "NORMAL"
+  },
+  "request_count": {
+    "baseline_rpm": 450.0,
+    "incident_rpm": 455.0,
+    "error_rate_pct": 34.1,
+    "severity": "CRITICAL"
+  },
+  "cpu_utilization": {
+    "baseline_pct": 20.0,
+    "incident_pct": 21.0,
+    "percentage_change": 5.0,
+    "severity": "NORMAL"
+  },
+  "memory_utilization": {
+    "baseline_pct": 35.0,
+    "incident_pct": 36.0,
+    "percentage_change": 2.86,
+    "severity": "NORMAL"
+  },
+  "recent_deployments": [
+    {
+      "revision_name": "checkout-service-00005-bad",
+      "deployed_at": "2026-09-05T14:58:00Z",
+      "traffic_percent": 100,
+      "author": "ci-cd-pipeline@cloudbuild.gserviceaccount.com"
+    },
+    {
+      "revision_name": "checkout-service-00004-v1",
+      "deployed_at": "2026-09-05T10:00:00Z",
+      "traffic_percent": 0,
+      "status": "HEALTHY"
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "orders-db",
+      "status": "HEALTHY"
+    }
+  ],
+  "traces": [
+    {
+      "trace_id": "trace-bad-rev-303",
+      "root_span": "/checkout",
+      "revision": "checkout-service-00005-bad",
+      "http_status": 500
+    }
+  ],
+  "blast_radius": {
+    "affected_services": ["checkout-service"],
+    "affected_endpoints": ["/checkout"],
+    "affected_revision": "checkout-service-00005-bad",
+    "scope": "service-wide",
+    "regional_scope": "regional (us-central1)"
+  },
+  "raw_evidence": [
+    {
+      "timestamp": "2026-09-05T14:58:15Z",
+      "source": "cloud_run_admin",
+      "message": "Traffic shifted 100% to revision checkout-service-00005-bad"
+    },
+    {
+      "timestamp": "2026-09-05T15:00:02Z",
+      "source": "logging",
+      "log": "ERROR: NullPointerException in PaymentProcessor.java:84 at checkout-service-00005-bad"
+    }
+  ]
+}

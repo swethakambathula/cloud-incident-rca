@@ -1,0 +1,26 @@
+{
+  "incident_id": "INC-004-DEPENDENCY-OUTAGE",
+  "root_cause": "Downstream dependency failure where orders-service became unavailable (returning HTTP 503) propagating errors to checkout-service",
+  "root_cause_category": "dependency_failure",
+  "confidence_score": 0.95,
+  "evidence": [
+    "182 DOWNSTREAM_DEPENDENCY_FAILURE logs citing target service orders-service with HTTP 503",
+    "Distributed trace trace-dep-fail-404 shows checkout-service failure originates from downstream call to http://orders-service/orders",
+    "Only endpoints dependent on orders-service are affected; independent endpoints (/health) are responding normally"
+  ],
+  "contradictory_evidence": [
+    "checkout-service host CPU (22.5%) and Memory (37%) are normal, eliminating internal resource saturation",
+    "No new revisions of checkout-service deployed recently, eliminating local code changes"
+  ],
+  "affected_services": [
+    "checkout-service",
+    "orders-service"
+  ],
+  "blast_radius": "Scope: multi-service-cascade affecting checkout-service on /simulate/dependency-failure. Downstream dependency orders-service is impacted. Region: regional (us-central1).",
+  "recommended_action": "Investigate downstream orders-service health, pod restarts, and verify circuit breaker / fallback responses in checkout-service",
+  "remediation_risk": "MEDIUM",
+  "additional_checks_required": [
+    "Check orders-service Cloud Run logs and error rates directly",
+    "Verify whether orders-service had an independent crash or deployment"
+  ]
+}

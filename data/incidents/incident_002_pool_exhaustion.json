@@ -1,0 +1,88 @@
+{
+  "incident_id": "INC-002-POOL-EXHAUSTION",
+  "start_time": "2026-09-05T14:30:00Z",
+  "end_time": "2026-09-05T14:45:00Z",
+  "project_id": "cloud-incident-prod",
+  "service_name": "checkout-service",
+  "revision_name": "checkout-service-00004-v1",
+  "region": "us-central1",
+  "severity": "P1",
+  "symptoms": [
+    "Database connection pool usage reached 100%",
+    "Severe latency increase across concurrent requests",
+    "Incoming request queueing with HTTP worker thread starvation",
+    "Underlying database server CPU utilization remains completely normal"
+  ],
+  "application_errors": [
+    {
+      "error_code": "DATABASE_CONNECTION_POOL_EXHAUSTED",
+      "count": 215,
+      "pool_active": 50,
+      "pool_max": 50,
+      "sample_message": "DATABASE_CONNECTION_POOL_EXHAUSTED pool_usage=100% waiting_threads=45"
+    }
+  ],
+  "request_errors": [
+    {
+      "endpoint": "/simulate/pool-exhaustion",
+      "status_code": 500,
+      "count": 215
+    }
+  ],
+  "latency": {
+    "baseline_p95_ms": 150.0,
+    "incident_p95_ms": 4800.0,
+    "percentage_change": 3100.0,
+    "severity": "CRITICAL"
+  },
+  "request_count": {
+    "baseline_rpm": 500.0,
+    "incident_rpm": 520.0,
+    "error_rate_pct": 28.5,
+    "severity": "CRITICAL"
+  },
+  "cpu_utilization": {
+    "baseline_pct": 25.0,
+    "incident_pct": 27.0,
+    "percentage_change": 8.0,
+    "severity": "NORMAL"
+  },
+  "memory_utilization": {
+    "baseline_pct": 42.0,
+    "incident_pct": 44.0,
+    "percentage_change": 4.76,
+    "severity": "NORMAL"
+  },
+  "recent_deployments": [],
+  "dependencies": [
+    {
+      "name": "orders-db",
+      "type": "database",
+      "server_cpu_pct": 18.0,
+      "active_connections_from_service": 50,
+      "status": "HEALTHY"
+    }
+  ],
+  "traces": [
+    {
+      "trace_id": "trace-pool-exhaust-102",
+      "root_span": "/simulate/pool-exhaustion",
+      "duration_ms": 4850.0,
+      "queue_wait_ms": 4500.0,
+      "db_query_ms": 15.0
+    }
+  ],
+  "blast_radius": {
+    "affected_services": ["checkout-service"],
+    "affected_endpoints": ["/simulate/pool-exhaustion"],
+    "scope": "service-wide",
+    "regional_scope": "regional (us-central1)"
+  },
+  "raw_evidence": [
+    {
+      "timestamp": "2026-09-05T14:32:00Z",
+      "source": "logging",
+      "log": "DATABASE_CONNECTION_POOL_EXHAUSTED: active=50, max=50, pending_acquire=45"
+    }
+  ]
+}

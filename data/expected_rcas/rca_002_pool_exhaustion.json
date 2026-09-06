@@ -1,0 +1,26 @@
+{
+  "incident_id": "INC-002-POOL-EXHAUSTION",
+  "root_cause": "Application connection pool exhaustion where active connections reached maximum limit causing thread queueing while database server remained healthy",
+  "root_cause_category": "connection_pool_exhaustion",
+  "confidence_score": 0.96,
+  "evidence": [
+    "215 DATABASE_CONNECTION_POOL_EXHAUSTED errors logged with pool_usage=100% and 45 pending acquire threads",
+    "Trace trace-pool-exhaust-102 shows 4500ms spent waiting in connection queue while query execution itself took only 15ms",
+    "Database server CPU is healthy at 18.0% indicating database bottleneck is client-side pool sizing or connection leaks"
+  ],
+  "contradictory_evidence": [
+    "Database server CPU remains at normal 18.0% ruling out database server overload",
+    "Application CPU utilization at 27.0% rules out host CPU starvation",
+    "Overall request volume is steady at 520 rpm ruling out external traffic spike"
+  ],
+  "affected_services": [
+    "checkout-service"
+  ],
+  "blast_radius": "Scope: service-wide affecting checkout-service on /simulate/pool-exhaustion. Region: regional (us-central1).",
+  "recommended_action": "Increase application maximum connection pool size, review connection leak timeouts, and restart instances to flush held connections",
+  "remediation_risk": "LOW",
+  "additional_checks_required": [
+    "Review application ORM transaction scopes for unclosed database connections",
+    "Verify max connection limits allowed by database server instance"
+  ]
+}

@@ -6,6 +6,10 @@ from pydantic import BaseModel, Field
 from enum import Enum
 from datetime import datetime
 
+# Import primary unified schemas
+from schemas.evidence import IncidentEvidence
+from schemas.rca import RCAResult
+
 
 class LogLevel(str, Enum):
     DEBUG = "DEBUG"

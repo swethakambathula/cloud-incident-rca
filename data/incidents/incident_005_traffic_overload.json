@@ -1,0 +1,89 @@
+{
+  "incident_id": "INC-005-TRAFFIC-OVERLOAD",
+  "start_time": "2026-09-05T16:00:00Z",
+  "end_time": "2026-09-05T16:15:00Z",
+  "project_id": "cloud-incident-prod",
+  "service_name": "checkout-service",
+  "revision_name": "checkout-service-00004-v1",
+  "region": "us-central1",
+  "severity": "P1",
+  "symptoms": [
+    "Unprecedented incoming request volume spike (450% above baseline)",
+    "CPU utilization saturated at 96% and memory utilization climbed to 88%",
+    "P95 latency degraded sharply and HTTP 503/504 error rate rose to 29.5%"
+  ],
+  "application_errors": [
+    {
+      "error_code": "REQUEST_QUEUE_FULL_THROTTLED",
+      "count": 480,
+      "sample_message": "REQUEST_QUEUE_FULL_THROTTLED max_concurrent_requests_exceeded instances=10 (max_instances reached)"
+    }
+  ],
+  "request_errors": [
+    {
+      "endpoint": "/*",
+      "status_code": 503,
+      "count": 480
+    }
+  ],
+  "latency": {
+    "baseline_p95_ms": 150.0,
+    "incident_p95_ms": 4200.0,
+    "percentage_change": 2700.0,
+    "severity": "CRITICAL"
+  },
+  "request_count": {
+    "baseline_rpm": 600.0,
+    "incident_rpm": 3300.0,
+    "percentage_change": 450.0,
+    "error_rate_pct": 29.5,
+    "severity": "CRITICAL"
+  },
+  "cpu_utilization": {
+    "baseline_pct": 30.0,
+    "incident_pct": 96.0,
+    "percentage_change": 220.0,
+    "severity": "CRITICAL"
+  },
+  "memory_utilization": {
+    "baseline_pct": 40.0,
+    "incident_pct": 88.0,
+    "percentage_change": 120.0,
+    "severity": "WARNING"
+  },
+  "recent_deployments": [],
+  "dependencies": [
+    {
+      "name": "orders-db",
+      "status": "DEGRADED_BY_LOAD"
+    }
+  ],
+  "traces": [
+    {
+      "trace_id": "trace-traffic-overload-505",
+      "root_span": "/simulate/cpu",
+      "duration_ms": 4150.0,
+      "server_queue_wait_ms": 3800.0
+    }
+  ],
+  "blast_radius": {
+    "affected_services": ["checkout-service"],
+    "affected_endpoints": ["all endpoints"],
+    "scope": "service-wide",
+    "regional_scope": "regional (us-central1)"
+  },
+  "raw_evidence": [
+    {
+      "timestamp": "2026-09-05T16:02:00Z",
+      "source": "monitoring",
+      "metric": "run.googleapis.com/container/cpu/utilizations",
+      "value": 0.96
+    },
+    {
+      "timestamp": "2026-09-05T16:02:10Z",
+      "source": "monitoring",
+      "metric": "run.googleapis.com/request_count",
+      "value": 3300
+    }
+  ]
+}

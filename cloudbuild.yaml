@@ -1,0 +1,19 @@
+steps:
+  - name: 'python:3.11'
+    entrypoint: pip
+    args: ['install', '-r', 'requirements.txt']
+  - name: 'python:3.11'
+    entrypoint: python
+    args: ['-m', 'pytest', '-q']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/rca-agent/rca-agent:$COMMIT_SHA', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/rca-agent/rca-agent:$COMMIT_SHA']
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args: ['run', 'deploy', 'rca-agent', '--image', '$_REGION-docker.pkg.dev/$PROJECT_ID/rca-agent/rca-agent:$COMMIT_SHA', '--region', '$_REGION', '--service-account', 'rca-reader-sa@$PROJECT_ID.iam.gserviceaccount.com', '--no-allow-unauthenticated']
+substitutions:
+  _REGION: us-central1
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 600s

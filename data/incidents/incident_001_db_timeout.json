@@ -1,0 +1,91 @@
+{
+  "incident_id": "INC-001-DB-TIMEOUT",
+  "start_time": "2026-09-05T14:10:00Z",
+  "end_time": "2026-09-05T14:25:00Z",
+  "project_id": "cloud-incident-prod",
+  "service_name": "checkout-service",
+  "revision_name": "checkout-service-00004-v1",
+  "region": "us-central1",
+  "severity": "P1",
+  "symptoms": [
+    "HTTP 500 errors on database-dependent checkout endpoints",
+    "DATABASE_CONNECTION_TIMEOUT application logs",
+    "Low database query response success rate (< 5%)"
+  ],
+  "application_errors": [
+    {
+      "error_code": "DATABASE_CONNECTION_TIMEOUT",
+      "count": 148,
+      "dependency": "orders-db.internal",
+      "sample_message": "DATABASE_CONNECTION_TIMEOUT service=checkout-service dependency=orders-db timeout=5000ms"
+    }
+  ],
+  "request_errors": [
+    {
+      "endpoint": "/simulate/error",
+      "status_code": 500,
+      "count": 148
+    }
+  ],
+  "latency": {
+    "baseline_p95_ms": 180.0,
+    "incident_p95_ms": 5020.0,
+    "percentage_change": 2688.89,
+    "severity": "CRITICAL"
+  },
+  "request_count": {
+    "baseline_rpm": 600.0,
+    "incident_rpm": 610.0,
+    "error_rate_pct": 24.2,
+    "severity": "CRITICAL"
+  },
+  "cpu_utilization": {
+    "baseline_pct": 22.0,
+    "incident_pct": 24.0,
+    "percentage_change": 9.09,
+    "severity": "NORMAL"
+  },
+  "memory_utilization": {
+    "baseline_pct": 38.0,
+    "incident_pct": 39.5,
+    "percentage_change": 3.95,
+    "severity": "NORMAL"
+  },
+  "recent_deployments": [
+    {
+      "revision_name": "checkout-service-00004-v1",
+      "deployed_at": "2026-09-05T10:00:00Z",
+      "traffic_percent": 100
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "orders-db",
+      "type": "database",
+      "status": "UNREACHABLE",
+      "consecutive_timeouts": 148
+    }
+  ],
+  "traces": [
+    {
+      "trace_id": "trace-db-timeout-901",
+      "root_span": "/simulate/error",
+      "duration_ms": 5025.0,
+      "db_span_duration_ms": 5000.0,
+      "db_status": "DEADLINE_EXCEEDED"
+    }
+  ],
+  "blast_radius": {
+    "affected_services": ["checkout-service"],
+    "affected_endpoints": ["/simulate/error"],
+    "scope": "service-wide",
+    "regional_scope": "regional (us-central1)"
+  },
+  "raw_evidence": [
+    {
+      "timestamp": "2026-09-05T14:10:05Z",
+      "source": "logging",
+      "log": "ERROR: DATABASE_CONNECTION_TIMEOUT - could not connect to orders-db.internal:5432 after 5000ms"
+    }
+  ]
+}
