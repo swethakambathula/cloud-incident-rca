@@ -1,0 +1,60 @@
+name: Deploy RCA Agent to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: project-f14fda81-0a51-4c38-9f3
+  REGION: us-central1
+  SERVICE: rca-agent
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # for WIF, remove if using key
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Auth: Option A (recommended): Workload Identity Federation ---
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}  # projects/123456.../providers/github
+          service_account: rca-agent-deployer@project-f14fda81-0a51-4c38-9f3.iam.gserviceaccount.com
+          # Option B (legacy key): uncomment below and add secret GCP_SA_KEY
+          # credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run (source)
+        run: |
+          gcloud run deploy $SERVICE \
+            --source . \
+            --region $REGION \
+            --project $PROJECT_ID \
+            --service-account rca-agent-sa@$PROJECT_ID.iam.gserviceaccount.com \
+            --allow-unauthenticated \
+            --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_REGION=$REGION,GEMINI_MODEL=gemini-2.5-flash,MAX_SCALE_LIMIT=20,USE_BIGQUERY=false,APP_VERSION=${{ github.sha }} \
+            --set-secrets GEMINI_API_KEY=gemini-api-key:latest
+
+      # Alternative container flow (uses Dockerfile + Artifact Registry):
+      # - run: |
+      #     gcloud builds submit --tag $REGION-docker.pkg.dev/$PROJECT_ID/rca-agent/rca-agent:${{ github.sha }} --project $PROJECT_ID
+      #     gcloud run deploy $SERVICE --image $REGION-docker.pkg.dev/$PROJECT_ID/rca-agent/rca-agent:${{ github.sha }} --region $REGION --project $PROJECT_ID
+
+      - name: Show URL
+        run: gcloud run services describe $SERVICE --region $REGION --project $PROJECT_ID --format="value(status.url)"
