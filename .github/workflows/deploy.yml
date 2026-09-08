@@ -48,7 +48,7 @@ jobs:
             --project $PROJECT_ID \
             --service-account rca-agent-sa@$PROJECT_ID.iam.gserviceaccount.com \
             --allow-unauthenticated \
-            --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_REGION=$REGION,GEMINI_MODEL=gemini-2.5-flash,MAX_SCALE_LIMIT=20,USE_BIGQUERY=false,APP_VERSION=${{ github.sha }} \
+            --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_REGION=$REGION,GEMINI_MODEL=gemini-2.5-flash,MAX_SCALE_LIMIT=20,USE_BIGQUERY=false,APP_VERSION=${{ github.sha }},LOG_BUCKET=${{ secrets.LOG_BUCKET }} \
             --set-secrets GEMINI_API_KEY=gemini-api-key:latest
 
       # Alternative container flow (uses Dockerfile + Artifact Registry):

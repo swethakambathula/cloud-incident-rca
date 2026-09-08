@@ -362,6 +362,21 @@ SCENARIO_MAP = {
 
 @app.get("/api/logs/live")
 def get_live_logs(limit: int = 50):
+    # Bucket is source of truth if configured - also return in-memory for low latency
+    bucket = None
+    try:
+        from tools.gcs_tools import get_log_bucket, download_blob_text
+        import json as _json
+        bucket = get_log_bucket()
+        if bucket and LATEST_SIMULATED_FILE:
+            # Try bucket-backed logs for durability (fallback to memory if empty)
+            text = download_blob_text(bucket, f"logs/live/{LATEST_SIMULATED_FILE}.jsonl")
+            if text:
+                lines = [ _json.loads(l) for l in text.strip().split("\n") if l.strip() ]
+                if lines:
+                    return lines[-limit:]
+    except Exception:
+        pass
     return SIMULATED_LOGS[-limit:]
 
 @app.post("/api/logs/clear")
@@ -380,19 +395,33 @@ def simulate_error(scenario: str):
     LATEST_SIMULATED_FILE = incident_file
     now = datetime.now(timezone.utc).isoformat()
     # inject 4-6 live log lines to mimic streaming errors
+    bucket = None
+    try:
+        from tools.gcs_tools import get_log_bucket
+        bucket = get_log_bucket()
+    except Exception:
+        bucket = None
     for i in range(5):
-        SIMULATED_LOGS.append({
+        entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "severity": severity,
             "error_code": code,
             "message": f"{code} {msg} ({i+1}/5) scenario={scenario}",
             "trace_id": f"trace-sim-{uuid.uuid4().hex[:8]}",
             "service": "checkout-service",
-        })
-        # small spread for ordering
+        }
+        SIMULATED_LOGS.append(entry)
+        # Bucket: append to GCS as durable log bucket storage
+        if bucket:
+            try:
+                from tools.gcs_tools import upload_jsonl_to_bucket
+                upload_jsonl_to_bucket(bucket, f"logs/live/{incident_file}.jsonl", entry)
+                upload_jsonl_to_bucket(bucket, "logs/live/central.jsonl", entry)
+            except Exception:
+                pass
     # also load static incident file for RCA context
     audit_log("SIMULATE", incident_file, "web-user", code, "checkout-service")
-    return {"simulated": True, "scenario": scenario, "incident_file": incident_file, "logs_injected": 5}
+    return {"simulated": True, "scenario": scenario, "incident_file": incident_file, "logs_injected": 5, "bucket": bucket or "local"}
 
 @app.get("/api/approvals/pending")
 def list_pending_approvals():

@@ -42,10 +42,22 @@ class MemoryStore:
                 return table_ref
             except Exception as e:
                 logger.warning(f"BigQuery save failed {e}, using file")
-        # File fallback (append-only)
+        # File fallback (append-only) + GCS bucket mirror (bucket is source of truth if LOG_BUCKET set)
         STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(STORE_PATH, "a", encoding="utf-8") as f:
             f.write(record.model_dump_json() + "\n")
+        # Also mirror to GCS bucket if configured
+        try:
+            from tools.gcs_tools import upload_jsonl_to_bucket, get_log_bucket, upload_blob_text
+            bucket = get_log_bucket()
+            if bucket:
+                # Full incident JSON per incident
+                blob_name = f"incidents/{record.incident_id}.json"
+                upload_blob_text(bucket, blob_name, record.model_dump_json(indent=2), content_type="application/json")
+                # Append to central memory JSONL in bucket
+                upload_jsonl_to_bucket(bucket, "incidents/memory.jsonl", record.model_dump())
+        except Exception as e:
+            logger.warning(f"Bucket memory mirror failed: {e}")
         return str(STORE_PATH)
 
     def load_all(self):

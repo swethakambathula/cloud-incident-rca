@@ -25,5 +25,17 @@ def audit_log(event_type: str, incident_id: str, actor: str, action: str, target
     AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(AUDIT_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
+    # Also store in GCS bucket if configured (bucket = source of truth)
+    try:
+        from tools.gcs_tools import upload_jsonl_to_bucket, get_log_bucket
+        bucket = get_log_bucket()
+        if bucket:
+            # Partition by incident_id and date for query efficiency
+            blob_name = f"audit/{incident_id}/{entry['timestamp'][:10]}.jsonl"
+            upload_jsonl_to_bucket(bucket, blob_name, entry)
+            # Also central audit log
+            upload_jsonl_to_bucket(bucket, "audit/central.jsonl", entry)
+    except Exception as e:
+        logger.warning(f"Bucket audit upload failed: {e}")
     logger.info(f"AUDIT {event_type} {incident_id} {action} by {actor}")
     return entry
