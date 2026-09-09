@@ -80,5 +80,11 @@ class ApprovalManager:
     def list_pending(self):
         return [r for r in self._store.values() if r.status == ApprovalStatus.PENDING]
 
+    def list_recent(self, limit: int = 10):
+        """Decided approvals (approved/rejected/expired/cancelled), newest first — decision history."""
+        decided = [r for r in self._store.values() if r.status != ApprovalStatus.PENDING]
+        decided.sort(key=lambda r: r.decided_at or r.requested_at or "", reverse=True)
+        return decided[:limit]
+
 # Global singleton for demo
 global_approval_manager = ApprovalManager()

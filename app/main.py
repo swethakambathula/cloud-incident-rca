@@ -189,6 +189,15 @@ function _approvalCard(a, accent){
   const pad=accent?'4px 10px':'2px 8px';
   return `<div style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:${pad};border-radius:4px;background:var(--accent-green);border:none;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:${pad};border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Reject</button></div></div>`;
 }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function _historyCard(a){
+  const st=a.status||'UNKNOWN';
+  const color=st==='APPROVED'?'var(--accent-green)':(st==='REJECTED'?'var(--accent-red)':'var(--accent-yellow)');
+  const when=String(a.decided_at||'').replace('T',' ').slice(0,19);
+  const note=a.decided_message?`<div style="margin-top:4px;font-style:italic;color:var(--text-main)">Note: ${esc(a.decided_message)}</div>`:'';
+  const by=a.decided_by?`<div>By ${esc(a.decided_by)} at ${esc(when)}</div>`:'';
+  return `<div style="padding:6px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:6px;margin-bottom:6px;font-size:.76rem;color:var(--text-muted)"><span style="color:${color};font-weight:700">${esc(st)}</span> <strong style="color:var(--text-main)">${esc(a.action)}</strong> ${esc(a.incident_id)}<br/>Risk ${esc(a.risk)}${by}${note}</div>`;
+}
 async function fetchLogs(){
   if(_pollInFlight) return;  // never stack overlapping polls — this was freezing the page
   _pollInFlight=true;
@@ -210,22 +219,25 @@ async function fetchLogs(){
       }
     }
     const pr=await fetch('/api/approvals/pending'); const d=await pr.json();
-    const asig=d.map(a=>a.approval_id+':'+a.status).join(',');
+    const hr=await fetch('/api/approvals/recent?limit=10'); const h=await hr.json();
+    const asig='P:'+d.map(a=>a.approval_id+':'+a.status).join(',')+'|H:'+h.map(a=>a.approval_id+':'+a.status).join(',');
     if(asig!==_lastApprSig){
-      const firstLoad=_lastApprSig==='';
-      _lastApprSig=asig;
-      const ab=document.getElementById('approval-box');
-      const prevIds=new Set([...document.querySelectorAll('.appr-msg')].map(el=>el.dataset.approvalId));
       const typing=document.activeElement&&document.activeElement.classList&&document.activeElement.classList.contains('appr-msg');
-      if(!d.length){ ab.innerHTML='No pending approvals'; }
+      if(typing){ /* skip rebuild while typing; retry on next poll */ }
       else{
-        // never rebuild while the user is typing — new approvals are appended, not re-rendered
-        if(typing){ /* skip: keep DOM + focus + text untouched */ }
-        else{ ab.innerHTML=d.map(a=>_approvalCard(a,false)).join(''); }
+        _lastApprSig=asig;
+        const ab=document.getElementById('approval-box');
+        const prevIds=new Set([...document.querySelectorAll('.appr-msg')].map(el=>el.dataset.approvalId));
+        let html='';
+        if(d.length){ html+= [...d].reverse().map(a=>_approvalCard(a,false)).join(''); }
+        else{ html+='<div style="font-size:.78rem;color:var(--text-muted);margin-bottom:6px">No pending approvals</div>'; }
+        if(h.length){ html+='<div style="font-size:.7rem;color:var(--text-muted);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.05em">Decision history</div>'+h.map(a=>_historyCard(a)).join(''); }
+        ab.innerHTML=html;
+        // focus ONLY a brand-new approval input, once — never steal focus otherwise
+        // (rebuilds never happen while typing, so reaching here means focus is safe to move)
+        const fresh=[...document.querySelectorAll('.appr-msg')].find(el=>!prevIds.has(el.dataset.approvalId));
+        if(fresh) fresh.focus();
       }
-      // focus ONLY a brand-new approval input, once — never steal focus otherwise
-      const fresh=[...document.querySelectorAll('.appr-msg')].find(el=>!prevIds.has(el.dataset.approvalId));
-      if(fresh&&(firstLoad||!typing)) fresh.focus();
     }
   }catch(e){ /* poll failure must never break the page */ }
   finally{ _pollInFlight=false; }
@@ -354,6 +366,18 @@ async def create_remediation_plan(incident_id: str):
     )
     audit_log("REMEDIATION_PLANNED", incident_id, "RemediationAgent", plan.recommended_action, approval.target_resource, before=None, after=plan.model_dump(), approval_id=approval.approval_id)
     return {"remediation_plan": plan.model_dump(), "approval": approval.model_dump()}
+
+# NOTE: static /api/approvals/pending + /recent must be registered BEFORE the
+# parameterized /api/approvals/{approval_id} route, otherwise "pending"/"recent"
+# are captured as an approval_id and return 404.
+@app.get("/api/approvals/pending")
+def list_pending_approvals():
+    return [r.model_dump() for r in global_approval_manager.list_pending()]
+
+@app.get("/api/approvals/recent")
+def list_recent_approvals(limit: int = 10):
+    """Decision history: approved/rejected/expired/cancelled, newest first."""
+    return [r.model_dump() for r in global_approval_manager.list_recent(limit)]
 
 @app.get("/approvals/{approval_id}")
 @app.get("/api/approvals/{approval_id}")
@@ -485,10 +509,6 @@ def simulate_error(scenario: str):
     # also load static incident file for RCA context
     audit_log("SIMULATE", incident_file, "web-user", code, "checkout-service")
     return {"simulated": True, "scenario": scenario, "incident_file": incident_file, "logs_injected": 5, "bucket": bucket or "local"}
-
-@app.get("/api/approvals/pending")
-def list_pending_approvals():
-    return [r.model_dump() for r in global_approval_manager.list_pending()]
 
 @app.post("/api/rca/live")
 async def run_live_rca():
