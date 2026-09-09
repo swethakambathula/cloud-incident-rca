@@ -27,8 +27,6 @@ class ApprovalRequest(BaseModel):
     expiration_time: str  # ISO8601
     requested_by_agent: str = "RemediationAgent"
     status: ApprovalStatus = ApprovalStatus.PENDING
-    action_type: str = "INFRASTRUCTURE_ACTION"
-    patch_sha256: Optional[str] = Field(default=None, description="Exact patch hash this approval binds to (CODE_CHANGE only)")
     requested_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     decided_at: Optional[str] = None
     decided_by: Optional[str] = None
