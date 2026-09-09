@@ -181,6 +181,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <div id="cf-meta" style="font-size:.8rem;color:var(--text-muted);margin-top:8px"></div>
                     </div>
                     <div id="cf-no-fix" style="display:none" class="item-box"></div>
+                    <div id="cf-preflight" style="font-size:.76rem;color:var(--text-muted);margin:8px 0"></div>
                     <div id="cf-lifecycle" style="font-size:.8rem;color:var(--text-muted);margin:8px 0"></div>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
                         <input id="cf-msg" placeholder="approval note (optional)…" style="flex:1;min-width:180px;background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:7px 10px;font-size:.8rem" />
@@ -360,10 +361,21 @@ async function runLiveRCA(){
   fetchLogs();
   if(useLive&&data.incident_id){ autoCodeFix(data.incident_id); }
 }
+async function refreshPreflight(){
+  try{
+    const p=await (await fetch('/api/gitops/preflight')).json();
+    const d=p.details||{};
+    const mark=v=>v?'✔':'✖';
+    document.getElementById('cf-preflight').innerHTML=
+      `<strong>Prerequisites:</strong> git-repo ${mark(d.is_git_repo)} · origin ${mark(d.has_origin)} · clean-tree ${mark(d.tree_clean)} · gh/token ${mark(d.gh_cli||d.gh_token_present)}`+
+      (d.hint?`<br/><span style="color:var(--accent-yellow)">${esc(d.hint)}</span>`:'');
+  }catch(e){ /* never break the panel */ }
+}
 async function autoCodeFix(incident_id){
   // Fire-and-forget code investigation right after RCA so the diff panel fills in
   try{
     document.getElementById('codefix-output').style.display='block';
+    refreshPreflight();
     document.getElementById('cf-investigation').innerHTML='<span style="color:var(--text-muted);font-size:.85rem">Investigating code…</span>';
     const inv=await (await fetch('/api/incidents/'+incident_id+'/analyze-code',{method:'POST'})).json();
     renderInvestigation(inv);
@@ -446,6 +458,7 @@ async function approveFixPR(){
   document.getElementById('cf-lifecycle').innerText='Status: Approved — applying approved patch…';
   r=await fetch('/api/incidents/'+LAST_INCIDENT+'/fix/apply',{method:'POST'});
   d=await r.json();
+  if(!r.ok){ document.getElementById('cf-lifecycle').innerText='Apply failed ('+r.status+'): '+(d.detail||'see server logs'); btn.disabled=false; btn.innerText='Approve & Create PR'; return; }
   await refreshFixStatus();
   btn.disabled=false; btn.innerText='Approve & Create PR';
   fetchLogs();
@@ -555,6 +568,12 @@ async def create_remediation_plan(incident_id: str):
 @app.get("/api/approvals/pending")
 def list_pending_approvals():
     return [r.model_dump() for r in global_approval_manager.list_pending()]
+
+@app.get("/api/gitops/preflight")
+def gitops_preflight():
+    from gitops.repository import preflight
+    return preflight(_demo_repo())
+
 
 @app.get("/api/approvals/recent")
 def list_recent_approvals(limit: int = 10):

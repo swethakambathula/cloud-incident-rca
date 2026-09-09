@@ -71,3 +71,59 @@ def ensure_clean_tree(repo_path: str):
 
 def current_branch(repo_path: str) -> str:
     return run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
+
+
+def preflight(repo_path: str) -> dict:
+    """Read-only readiness check for the fix pipeline (no mutations).
+
+    The dashboard shows this BEFORE approval so a missing git checkout,
+    origin remote, identity or GH_TOKEN is visible instead of a silent failure.
+    Token values are never returned (presence boolean only).
+    """
+    import shutil as _shutil
+    checks = {"repo_path": repo_path, "ready": False, "details": {}}
+    d = checks["details"]
+    d["path_exists"] = os.path.isdir(repo_path)
+    if not d["path_exists"]:
+        d["hint"] = "Set DEMO_APP_PATH to a git checkout of cloud-rca-demo-app"
+        return checks
+
+    def _git(args, timeout=20):
+        try:
+            p = subprocess.run(["git", "-C", repo_path] + args, capture_output=True,
+                               text=True, timeout=timeout)
+            return p.returncode == 0, p.stdout.strip()
+        except Exception as e:
+            return False, str(e)[:200]
+
+    ok, _ = _git(["rev-parse", "--git-dir"])
+    d["is_git_repo"] = ok
+    ok, remote = _git(["remote", "get-url", "origin"])
+    d["has_origin"] = ok
+    d["origin_url"] = (remote[:60] + "...") if ok and len(remote) > 63 else (remote if ok else "")
+    try:
+        d["default_branch"] = default_branch(repo_path) if ok else "-"
+    except Exception:
+        d["default_branch"] = "-"
+    ok, email = _git(["config", "user.email"])
+    d["git_identity"] = bool(ok and email)
+    d["gh_cli"] = _shutil.which("gh") is not None
+    d["gh_token_present"] = bool(os.getenv("GH_TOKEN", ""))
+    try:
+        ok, branch = _git(["rev-parse", "--abbrev-ref", "HEAD"])
+        d["current_branch"] = branch if ok else "?"
+        d["tree_clean"] = (_git(["status", "--porcelain"])[1] == "")
+    except Exception:
+        d["current_branch"], d["tree_clean"] = "?", False
+    d["ready_for_branch"] = bool(d["is_git_repo"] and d["has_origin"] and d["tree_clean"])
+    d["ready_for_pr"] = bool(d["ready_for_branch"] and (d["gh_cli"] or d["gh_token_present"]))
+    checks["ready"] = d["ready_for_pr"]
+    if not d["is_git_repo"]:
+        d["hint"] = ("DEMO_APP_PATH is not a git checkout (Cloud Run source deploy ships "
+                     "files without .git). Clone the demo repo with an origin remote, or run "
+                     "the dashboard locally where cloud-rca-demo-app/ is a git checkout.")
+    elif not d["has_origin"]:
+        d["hint"] = "Add an origin remote: git remote add origin <cloud-rca-demo-app-url>"
+    elif not d["ready_for_pr"]:
+        d["hint"] = "Install gh CLI or set GH_TOKEN so the PR can be opened after push."
+    return checks
