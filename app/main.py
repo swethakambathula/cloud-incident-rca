@@ -158,7 +158,7 @@ async function fetchLogs(){
       const prevFocus=document.activeElement&&document.activeElement.id?document.activeElement.id:null;
       const prevVals={}; document.querySelectorAll('.appr-msg').forEach(el=>{prevVals[el.dataset.approvalId]=el.value;});
       const prevIds=new Set([...document.querySelectorAll('.appr-msg')].map(el=>el.dataset.approvalId));
-      ab.innerHTML=d.map(a=>`<div style="padding:6px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — e.g. verified blast radius, rollback ready" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" onkeydown="if(event.key==='Enter'){sendDecision('${a.approval_id}',true);}" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true)" style="padding:2px 8px;border-radius:4px;background:var(--accent-green);border:none;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false)" style="margin-left:6px;padding:2px 8px;border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Reject</button></div></div>`).join('');
+      ab.innerHTML=d.map(a=>`<div style="padding:6px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:2px 8px;border-radius:4px;background:var(--accent-green);border:none;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:2px 8px;border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Reject</button></div></div>`).join('');
       // restore in-progress typing
       document.querySelectorAll('.appr-msg').forEach(el=>{ if(prevVals[el.dataset.approvalId]!==undefined) el.value=prevVals[el.dataset.approvalId]; });
       // focus first new approval input
@@ -168,9 +168,13 @@ async function fetchLogs(){
     } else {ab.innerHTML='No pending approvals';}
   });
 }
-async function sendDecision(id, isApprove){
+async function sendDecision(id, isApprove, action, incident, risk){
   const input=document.getElementById('msg-'+id);
   const message=input?input.value.trim():"";
+  const verb=isApprove?'APPROVE':'REJECT';
+  // Explicit human confirmation — nothing is auto-approved; Enter key alone never submits
+  const detail=(action||'')+(incident?' for '+incident:'')+(risk?' (Risk '+risk+')':'')+(message?'\nNote: '+message:'');
+  if(!confirm(verb+' this remediation?\n\n'+detail)) return;
   const endpoint=isApprove?'/api/approvals/'+id+'/approve':'/api/approvals/'+id+'/reject';
   await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});
   fetchLogs();
@@ -190,7 +194,7 @@ async function runLiveRCA(){
   // For live, data contains remediation_plan+approval
   renderRCA(rca.root_cause?rca:{...rca, ...rca.remediation_plan});
   // If live returned approval, show it with message box + focus
-  if(data.approval){ document.getElementById('approval-box').innerHTML=`<div style="padding:6px;border:1px solid var(--accent-cyan);border-radius:6px"><strong>New Approval ${data.approval.approval_id}</strong><br/>${data.approval.action} Risk ${data.approval.risk}<br/><input class="appr-msg" data-approval-id="${data.approval.approval_id}" id="msg-${data.approval.approval_id}" placeholder="Add a note (optional) — Enter to approve" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" onkeydown="if(event.key==='Enter'){sendDecision('${data.approval.approval_id}',true);}" /><div style="margin-top:6px"><button onclick="sendDecision('${data.approval.approval_id}',true)" style="padding:4px 10px;background:var(--accent-green);border:none;border-radius:4px;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${data.approval.approval_id}',false)" style="margin-left:6px;padding:4px 10px;background:var(--accent-red);border:none;border-radius:4px;color:#fff;cursor:pointer">Reject</button></div></div>`; const inp=document.getElementById('msg-'+data.approval.approval_id); if(inp) inp.focus(); }
+  if(data.approval){ const ap=data.approval; document.getElementById('approval-box').innerHTML=`<div style="padding:6px;border:1px solid var(--accent-cyan);border-radius:6px"><strong>New Approval ${ap.approval_id}</strong><br/>${ap.action} Risk ${ap.risk}<br/><input class="appr-msg" data-approval-id="${ap.approval_id}" id="msg-${ap.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${ap.approval_id}',true,'${ap.action}','${ap.incident_id}','${ap.risk}')" style="padding:4px 10px;background:var(--accent-green);border:none;border-radius:4px;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${ap.approval_id}',false,'${ap.action}','${ap.incident_id}','${ap.risk}')" style="margin-left:6px;padding:4px 10px;background:var(--accent-red);border:none;border-radius:4px;color:#fff;cursor:pointer">Reject</button></div></div>`; const inp=document.getElementById('msg-'+ap.approval_id); if(inp) inp.focus(); }
   btn.disabled=false; btn.innerText='🧠 Do RCA (Live)';
   fetchLogs();
 }
