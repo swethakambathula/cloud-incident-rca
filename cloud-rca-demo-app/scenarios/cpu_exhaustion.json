@@ -1,0 +1,14 @@
+{
+  "scenario": "cpu_exhaustion",
+  "incident_type": "CPU_EXHAUSTION",
+  "service_name": "checkout-service",
+  "endpoint": "/checkout",
+  "status_code": 503,
+  "error_code": "CPU_SATURATION_THROTTLED",
+  "latency_ms": 3800,
+  "ground_truth": {
+    "root_cause_category": "cpu_exhaustion",
+    "expected_fix_file": null,
+    "no_code_fix_reason": "Compute saturation (infra). No safe code change."
+  }
+}

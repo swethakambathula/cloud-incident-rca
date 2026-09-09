@@ -1,0 +1,14 @@
+{
+  "scenario": "bad_deployment",
+  "incident_type": "BAD_DEPLOYMENT",
+  "service_name": "checkout-service",
+  "endpoint": "/checkout",
+  "status_code": 500,
+  "error_code": "NULL_POINTER_EXCEPTION",
+  "latency_ms": 220,
+  "ground_truth": {
+    "root_cause_category": "faulty_revision",
+    "expected_fix_file": "services/checkout/config.py",
+    "no_code_fix_reason": null
+  }
+}

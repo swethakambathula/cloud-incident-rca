@@ -1,0 +1,14 @@
+{
+  "scenario": "rate_limit",
+  "incident_type": "RATE_LIMIT",
+  "service_name": "payments-service",
+  "endpoint": "/checkout",
+  "status_code": 429,
+  "error_code": "RATE_LIMIT_EXCEEDED",
+  "latency_ms": 80,
+  "ground_truth": {
+    "root_cause_category": "rate_limit",
+    "expected_fix_file": null,
+    "no_code_fix_reason": "Quota/policy signal (429). Not an infrastructure outage."
+  }
+}

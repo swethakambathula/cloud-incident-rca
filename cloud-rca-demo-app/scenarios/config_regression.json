@@ -1,0 +1,14 @@
+{
+  "scenario": "config_regression",
+  "incident_type": "CONFIG_REGRESSION",
+  "service_name": "checkout-service",
+  "endpoint": "/checkout",
+  "status_code": 500,
+  "error_code": "CONFIGURATION_REGRESSION",
+  "latency_ms": 165,
+  "ground_truth": {
+    "root_cause_category": "configuration_regression",
+    "expected_fix_file": "services/checkout/config.py",
+    "no_code_fix_reason": null
+  }
+}

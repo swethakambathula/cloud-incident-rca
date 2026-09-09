@@ -341,6 +341,25 @@ pytest tests/test_phase4_safety.py tests/test_phase4_workflow.py -v # negative: 
 
 **Phase 4 Exit Criteria:** 1. Structured remediation ✔ 2. Policy checked ✔ 3. Human approval ✔ 4. Executor gated ✔ 5. Cloud Run rollback end-to-end (mock+real) ✔ 6. Before/after captured ✔ 7. Pre/post metrics comparison ✔ 8. Deterministic rules ✔ 9. Regression detected ✔ 10. State machine ✔ 11. BigQuery/file memory ✔ 12. Similar retrieval ✔ 13. Postmortem ✔ 14. Audit trail ✔ 15. IAM separation ✔ 16. Negative tests pass ✔ 17. 3 scenarios ✔ 18. Cloud Run deployed ✔ 19. CI/CD ✔ 20. End-to-end demo ✔
 
+## 🔧 Live RCA → Code Fix → Pull Request
+
+End-to-end: **Simulate → Live Logs → Live RCA → Code Investigation → Inline Diff → Human Approval (hash-bound) → Branch → Patch → Tests → Commit → Push → PR**. Main is never written directly.
+
+**Demo app repo** (`cloud-rca-demo-app/`, publish separately):
+```bash
+cd cloud-rca-demo-app && git init -b main && git add -A && git commit -m "feat: faulty demo services"
+gh repo create swethakambathula/cloud-rca-demo-app --public --source=. --push
+```
+Faulty services (`checkout` pool/config/downstream, `orders`, `payments`) + 12 `scenarios/*.json` with ground truth + pytest suite that fails on faulty code and passes after the approved patch.
+
+**Website flow:** click any of 12 Simulate buttons → live structured logs stream (filters: service/severity/error/trace/search, pause/resume, summary row with totals/5xx/4xx/p95/CPU/mem/revision/duration) → **Do RCA (Live)** runs a fresh investigation from the live stream (counts/rates/latency recomputed; static files only supply deployments/traces) → **Suggested Code Fix** panel auto-fills: code evidence (file:line), inline red/green diff, reason/risk/files/tests/patch-SHA256 → **Approve & Create PR** (confirm dialog) → lifecycle `Suggested → Waiting → Approved → Branch Created → Patch Applied → Testing → Tests Passed → Committed → Pushed → PR Created` with branch/commit/`#PR` + **View Pull Request**. Infra incidents (DB down, traffic, …) honestly show *“No safe code-level remediation identified.”*
+
+**Safety:** deterministic code/patch agents (no LLM-invented diffs); approval binds exact `patch_sha256` (regeneration invalidates); `gitops/` allowlists git subcommands, blocks `--force`/`--hard`/`--all`/merges, pushes only `rca/{incident}-{slug}`, refuses main writes; test failure blocks PR (branch retained); never auto-merges; `GH_TOKEN` never returned. Env: `DEMO_APP_PATH` (default `cloud-rca-demo-app/`), `GH_TOKEN` for live PR creation, `LOG_BUCKET` for bucket log storage.
+
+**API:** `POST /api/incidents/{id}/analyze-code`, `POST .../generate-fix`, `GET .../fix`, `POST .../fix/approve|reject` (`{message}`), `POST .../fix/apply` (403 without APPROVED, 409 on hash drift), `GET .../fix/status`, `GET .../pr`.
+
+**Verify:** `pytest -q` (84 pass; `pytest.ini` scopes the gate — demo-app suite runs explicitly and fails pre-patch by design), `pytest tests/test_code_fix.py -v` (16: discovery, hashing, mismatch rejection, approval/expiry gating, branch naming, main protection, no-force/no-merge, test-gated PR, PR body).
+
 ---
 
 ## 🧪 Running Automated Tests

@@ -1,0 +1,14 @@
+{
+  "scenario": "network_timeout",
+  "incident_type": "NETWORK_TIMEOUT",
+  "service_name": "checkout-service",
+  "endpoint": "/checkout",
+  "status_code": 504,
+  "error_code": "DOWNSTREAM_TIMEOUT",
+  "latency_ms": 5000,
+  "ground_truth": {
+    "root_cause_category": "network_timeout",
+    "expected_fix_file": null,
+    "no_code_fix_reason": "Network-level timeout with healthy resources; needs network evidence."
+  }
+}

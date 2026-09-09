@@ -15,7 +15,9 @@ class ApprovalManager:
 
     def create_request(self, incident_id: str, action: str, target_resource: str, rationale: str,
                        root_cause: str, confidence: float, risk: str, expected_impact: str,
-                       rollback_plan: str, expiration_minutes: int = 60) -> ApprovalRequest:
+                       rollback_plan: str, expiration_minutes: int = 60,
+                       action_type: str = "INFRASTRUCTURE_ACTION",
+                       patch_sha256: Optional[str] = None) -> ApprovalRequest:
         approval_id = f"APPROVAL-{uuid.uuid4().hex[:8].upper()}"
         exp = (datetime.now(timezone.utc) + timedelta(minutes=expiration_minutes)).isoformat()
         req = ApprovalRequest(
@@ -31,6 +33,8 @@ class ApprovalManager:
             rollback_plan=rollback_plan,
             expiration_time=exp,
             status=ApprovalStatus.PENDING,
+            action_type=action_type,
+            patch_sha256=patch_sha256,
         )
         self._store[approval_id] = req
         logger.info(f"Created approval {approval_id} for {action} PENDING")

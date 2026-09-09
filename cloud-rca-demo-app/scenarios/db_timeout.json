@@ -1,0 +1,14 @@
+{
+  "scenario": "db_timeout",
+  "incident_type": "DB_TIMEOUT",
+  "service_name": "checkout-service",
+  "endpoint": "/checkout",
+  "status_code": 500,
+  "error_code": "DATABASE_CONNECTION_TIMEOUT",
+  "latency_ms": 5020,
+  "ground_truth": {
+    "root_cause_category": "database_connectivity",
+    "expected_fix_file": null,
+    "no_code_fix_reason": "Database host unreachable (infra/Cloud SQL). No safe code change."
+  }
+}

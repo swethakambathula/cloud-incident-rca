@@ -1,0 +1,14 @@
+{
+  "scenario": "dependency_failure",
+  "incident_type": "DEPENDENCY_FAILURE",
+  "service_name": "checkout-service",
+  "endpoint": "/checkout",
+  "status_code": 502,
+  "error_code": "DOWNSTREAM_DEPENDENCY_FAILURE",
+  "latency_ms": 1150,
+  "ground_truth": {
+    "root_cause_category": "dependency_failure",
+    "expected_fix_file": "services/checkout/dependencies.py",
+    "no_code_fix_reason": null
+  }
+}

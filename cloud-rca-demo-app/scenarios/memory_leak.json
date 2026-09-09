@@ -1,0 +1,14 @@
+{
+  "scenario": "memory_leak",
+  "incident_type": "MEMORY_LEAK",
+  "service_name": "checkout-service",
+  "endpoint": "/checkout",
+  "status_code": 500,
+  "error_code": "MEMORY_PRESSURE_OOM_RISK",
+  "latency_ms": 900,
+  "ground_truth": {
+    "root_cause_category": "memory_leak",
+    "expected_fix_file": null,
+    "no_code_fix_reason": "Requires heap profiling; no safe minimal patch."
+  }
+}

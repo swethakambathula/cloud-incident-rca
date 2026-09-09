@@ -127,12 +127,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <button class="sim-btn" onclick="simulate('dependency-failure')">Dependency Failure</button>
             <button class="sim-btn" onclick="simulate('traffic-overload')">Traffic Overload</button>
             <button class="sim-btn" onclick="simulate('config-error')">Config Error</button>
+            <button class="sim-btn" onclick="simulate('memory-leak')">Memory Leak</button>
+            <button class="sim-btn" onclick="simulate('cpu-exhaustion')">CPU Exhaustion</button>
+            <button class="sim-btn" onclick="simulate('auth-failure')">Auth Failure</button>
+            <button class="sim-btn" onclick="simulate('network-timeout')">Network Timeout</button>
+            <button class="sim-btn" onclick="simulate('malformed-payload')">Malformed Input</button>
+            <button class="sim-btn" onclick="simulate('rate-limit')">Rate Limit</button>
             <button class="sim-btn btn-red" onclick="clearLogs()">Clear</button>
             <span id="live-status" style="margin-left:auto;font-size:.78rem;color:var(--text-muted)"><span class="status-dot dot-green"></span>Live</span>
         </div>
         <div class="grid">
             <div class="card" style="grid-column: span 2;">
-                <div class="card-title">📡 Live Logs <span style="font-size:.75rem;color:var(--text-muted);font-weight:400">— auto-refresh every 1s, click Simulate to inject</span></div>
+                <div class="card-title">📡 Live Logs <span style="font-size:.75rem;color:var(--text-muted);font-weight:400">— auto-refresh every 3s, click Simulate to inject</span>
+                    <button class="sim-btn" id="pause-btn" onclick="togglePause()" style="margin-left:auto">Pause</button>
+                </div>
+                <div id="log-summary" style="display:flex;flex-wrap:wrap;gap:14px;font-size:.78rem;color:var(--text-muted);margin-bottom:8px;padding:8px 10px;background:#020617;border:1px solid var(--border-color);border-radius:6px">No data yet — simulate an incident.</div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;font-size:.78rem">
+                    <select id="f-service" onchange="renderLogs()" style="background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All services</option></select>
+                    <select id="f-severity" onchange="renderLogs()" style="background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All severities</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select>
+                    <select id="f-error" onchange="renderLogs()" style="background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px;max-width:220px"><option value="">All error types</option></select>
+                    <input id="f-trace" oninput="renderLogs()" placeholder="trace id…" style="background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem;width:150px" />
+                    <input id="f-search" oninput="renderLogs()" placeholder="search logs…" style="flex:1;min-width:140px;background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem" />
+                </div>
                 <div id="live-logs" class="log-panel">Waiting for simulated errors... Click any 🧪 button above.</div>
             </div>
         </div>
@@ -154,10 +170,38 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="card"><div class="card-title">✖ Contradictory Evidence Analyzed</div><div id="contra-list"></div></div>
             </div>
         </div>
+        <div id="codefix-output" style="display:none;">
+            <div class="grid">
+                <div class="card" style="grid-column: span 2;">
+                    <div class="card-title">🔧 Suggested Code Fix <span id="cf-status-badge" class="badge badge-yellow" style="margin-left:8px">Suggested</span></div>
+                    <div id="cf-investigation" style="margin-bottom:12px"></div>
+                    <div id="cf-diff-wrap" style="display:none;margin-bottom:12px">
+                        <div style="font-size:.85rem;color:var(--text-muted);margin-bottom:6px"><strong>Inline diff</strong> <span id="cf-files" style="margin-left:8px"></span></div>
+                        <pre id="cf-diff" style="background:#020617;border:1px solid var(--border-color);border-radius:6px;padding:12px;overflow-x:auto;font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.5;white-space:pre-wrap"></pre>
+                        <div id="cf-meta" style="font-size:.8rem;color:var(--text-muted);margin-top:8px"></div>
+                    </div>
+                    <div id="cf-no-fix" style="display:none" class="item-box"></div>
+                    <div id="cf-lifecycle" style="font-size:.8rem;color:var(--text-muted);margin:8px 0"></div>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
+                        <input id="cf-msg" placeholder="approval note (optional)…" style="flex:1;min-width:180px;background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:7px 10px;font-size:.8rem" />
+                        <button class="btn btn-green" id="cf-approve-btn" onclick="approveFixPR()">Approve &amp; Create PR</button>
+                        <button class="btn btn-red" onclick="rejectFix()">Reject</button>
+                        <button class="sim-btn" onclick="generateFix(true)">Regenerate Fix</button>
+                    </div>
+                    <div id="cf-pr" style="margin-top:10px"></div>
+                    <div id="cf-tests" style="margin-top:8px;font-size:.8rem"></div>
+                </div>
+            </div>
+        </div>
     </div>
 <script>
 let currentIncident='incident_001_db_timeout.json';
 let liveIncidentFile=null;
+let liveScenario=null;
+let LAST_INCIDENT=null;
+let LOGS=[];
+let PAUSED=false;
+let _lastSumSig='';
 
 async function loadIncidents(){
   const res=await fetch('/api/incidents'); const files=await res.json();
@@ -174,10 +218,12 @@ async function simulate(scenario){
   const btn=document.getElementById('live-status'); btn.innerHTML='<span class="status-dot dot-red"></span>Injecting...';
   const res=await fetch('/api/simulate/'+scenario,{method:'POST'});
   const data=await res.json();
-  liveIncidentFile=data.incident_file;
-  currentIncident=data.incident_file;
+  liveScenario=data.scenario;
+  if(data.incident_file){ liveIncidentFile=data.incident_file; currentIncident=data.incident_file; }
+  else{ liveIncidentFile=null; }
   document.getElementById('inc-title').innerText='Live Simulated: '+scenario;
   document.getElementById('inc-desc').innerText='Injected at '+new Date().toLocaleTimeString()+' — logs streaming below → click Do RCA';
+  document.getElementById('codefix-output').style.display='none'; LAST_INCIDENT=null;
   btn.innerHTML='<span class="status-dot dot-red"></span>Error injected!';
   setTimeout(()=>btn.innerHTML='<span class="status-dot dot-green"></span>Live',1800);
   fetchLogs();
@@ -202,20 +248,26 @@ async function fetchLogs(){
   if(_pollInFlight) return;  // never stack overlapping polls — this was freezing the page
   _pollInFlight=true;
   try{
-    const res=await fetch('/api/logs/live?limit=80'); const logs=await res.json();
+    const res=await fetch('/api/logs/live?limit=200'); const logs=await res.json();
+    LOGS=logs;
     const sig=logs.length+'|'+(logs.length?logs[logs.length-1].timestamp+logs[logs.length-1].message:'empty');
     if(sig!==_lastLogSig){
       _lastLogSig=sig;
-      const box=document.getElementById('live-logs');
-      if(!logs.length){ box.innerHTML='<span class="log-info">No errors yet — click 🧪 Simulate Errors above</span>'; }
-      else{
-        // only force-scroll if user is already near the bottom, so reading isn't yanked away
-        const nearBottom=(box.scrollHeight-box.scrollTop-box.clientHeight)<60;
-        box.innerHTML=logs.map(l=>{
-          const cls=l.severity==='ERROR'?'log-error':l.severity==='WARNING'?'log-warn':'log-info';
-          return `<div class="log-line ${cls}">[${l.timestamp}] <strong>${l.severity}</strong> ${l.error_code||''} ${l.message} <span style="opacity:.6">trace=${l.trace_id||'none'}</span></div>`;
-        }).join('');
-        if(nearBottom) box.scrollTop=box.scrollHeight;
+      _refreshFilterOptions();
+      if(!PAUSED) renderLogs();
+      const sum=await (await fetch('/api/logs/summary')).json();
+      const s2=[sum.total_requests,sum.error_5xx_rate_pct,sum.error_4xx_rate_pct,sum.p95_latency_ms,sum.avg_cpu_pct,sum.avg_memory_pct,sum.active_revision,sum.incident_duration_s].join('|');
+      if(s2!==_lastSumSig){
+        _lastSumSig=s2;
+        document.getElementById('log-summary').innerHTML=
+          `<span><strong>Total:</strong> ${sum.total_requests}</span>`+
+          `<span><strong>5xx:</strong> ${sum.error_5xx_rate_pct}%</span>`+
+          `<span><strong>4xx:</strong> ${sum.error_4xx_rate_pct}%</span>`+
+          `<span><strong>P95:</strong> ${sum.p95_latency_ms}ms</span>`+
+          `<span><strong>CPU:</strong> ${sum.avg_cpu_pct}%</span>`+
+          `<span><strong>Mem:</strong> ${sum.avg_memory_pct}%</span>`+
+          `<span><strong>Revision:</strong> ${esc(sum.active_revision)}</span>`+
+          `<span><strong>Duration:</strong> ${sum.incident_duration_s}s</span>`;
       }
     }
     const pr=await fetch('/api/approvals/pending'); const d=await pr.json();
@@ -242,6 +294,40 @@ async function fetchLogs(){
   }catch(e){ /* poll failure must never break the page */ }
   finally{ _pollInFlight=false; }
 }
+function togglePause(){
+  PAUSED=!PAUSED;
+  document.getElementById('pause-btn').innerText=PAUSED?'Resume':'Pause';
+  if(!PAUSED) renderLogs();
+}
+function _refreshFilterOptions(){
+  const svc=document.getElementById('f-service'), err=document.getElementById('f-error');
+  const svcs=[...new Set(LOGS.map(l=>l.service_name||l.service||'unknown'))].sort();
+  const errs=[...new Set(LOGS.map(l=>l.error_code).filter(Boolean))].sort();
+  const keep=(el,vals,first)=>{ const cur=el.value; el.innerHTML=`<option value="">${first}</option>`+vals.map(v=>`<option>${esc(v)}</option>`).join(''); if(vals.includes(cur)) el.value=cur; };
+  keep(svc,svcs,'All services'); keep(err,errs,'All error types');
+}
+function renderLogs(){
+  const box=document.getElementById('live-logs');
+  if(!LOGS.length){ box.innerHTML='<span class="log-info">No errors yet — click Simulate Errors above</span>'; return; }
+  const fs=document.getElementById('f-service').value, sev=document.getElementById('f-severity').value,
+        fe=document.getElementById('f-error').value,
+        ft=document.getElementById('f-trace').value.trim().toLowerCase(),
+        fq=document.getElementById('f-search').value.trim().toLowerCase();
+  const rows=LOGS.filter(l=>{
+    if(fs&&(l.service_name||l.service||'unknown')!==fs) return false;
+    if(sev&&l.severity!==sev) return false;
+    if(fe&&(l.error_code||'')!==fe) return false;
+    if(ft&&!(l.trace_id||'').toLowerCase().includes(ft)) return false;
+    if(fq&&!((l.message||'')+' '+(l.error_code||'')+' '+(l.endpoint||'')).toLowerCase().includes(fq)) return false;
+    return true;
+  });
+  const nearBottom=(box.scrollHeight-box.scrollTop-box.clientHeight)<60;
+  box.innerHTML=rows.length?rows.map(l=>{
+    const cls=l.severity==='ERROR'||l.severity==='CRITICAL'?'log-error':(l.severity==='WARNING'?'log-warn':'log-info');
+    return `<div class="log-line ${cls}">[${esc(l.timestamp)}] <strong>${esc(l.severity)}</strong> ${esc(l.service_name||l.service||'')} ${esc(l.error_code||'')} ${esc(l.message||'')} <span style="opacity:.6">${esc(l.endpoint||'')} ${l.status_code||''} ${l.latency_ms||''}ms trace=${esc(l.trace_id||'none')}</span></div>`;
+  }).join(''):'<span class="log-info">No logs match filters</span>';
+  if(nearBottom) box.scrollTop=box.scrollHeight;
+}
 async function sendDecision(id, isApprove, action, incident, risk){
   const input=document.getElementById('msg-'+id);
   const message=input?input.value.trim():"";
@@ -259,9 +345,10 @@ async function runRCA(){ const out=document.getElementById('rca-output'); out.st
 async function runLiveRCA(){
   const btn=document.getElementById('rca-btn'); btn.disabled=true; btn.innerText='⏳ Investigating...';
   const target=liveIncidentFile||currentIncident;
-  // Use multi-agent live endpoint if live incident exists, else static
-  const url=liveIncidentFile?'/api/rca/live':'/api/analyze/'+target;
-  const res=await fetch(url,{method: liveIncidentFile?'POST':'GET'});
+  // Use multi-agent live endpoint whenever a simulation ran, else static file
+  const useLive=!!(liveScenario||liveIncidentFile);
+  const url=useLive?'/api/rca/live':'/api/analyze/'+target;
+  const res=await fetch(url,{method: useLive?'POST':'GET'});
   const data=await res.json();
   // Normalize both response shapes
   const rca=data.root_cause?data:data;
@@ -271,9 +358,21 @@ async function runLiveRCA(){
   if(data.approval){ const ap=data.approval; _lastApprSig=ap.approval_id+':'+ap.status; document.getElementById('approval-box').innerHTML=_approvalCard(ap,true); const inp=document.getElementById('msg-'+ap.approval_id); if(inp) inp.focus(); }
   btn.disabled=false; btn.innerText='🧠 Do RCA (Live)';
   fetchLogs();
+  if(useLive&&data.incident_id){ autoCodeFix(data.incident_id); }
+}
+async function autoCodeFix(incident_id){
+  // Fire-and-forget code investigation right after RCA so the diff panel fills in
+  try{
+    document.getElementById('codefix-output').style.display='block';
+    document.getElementById('cf-investigation').innerHTML='<span style="color:var(--text-muted);font-size:.85rem">Investigating code…</span>';
+    const inv=await (await fetch('/api/incidents/'+incident_id+'/analyze-code',{method:'POST'})).json();
+    renderInvestigation(inv);
+    await generateFix(false);
+  }catch(e){ document.getElementById('cf-investigation').innerHTML='<span style="color:var(--accent-red)">Code investigation failed: '+esc(e.message||e)+'</span>'; }
 }
 function renderRCA(data){
   const out=document.getElementById('rca-output'); out.style.display='block';
+  LAST_INCIDENT=data.incident_id||null;
   document.getElementById('inc-title').innerText="Incident: "+data.incident_id;
   document.getElementById('inc-desc').innerText=`Affected: ${(data.affected_services||[]).join(', ')}`;
   document.getElementById('rc-category').innerText=(data.root_cause_category||'unknown').toUpperCase();
@@ -289,6 +388,89 @@ function renderRCA(data){
   const rb=document.getElementById('remediation-box');
   if(data.remediation_plan||data.approval){ const p=data.remediation_plan||data; const a=data.approval; rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#020617"><strong>Remediation:</strong> ${p.recommended_action||p.action} (${p.mitigation_type||''}) Risk ${p.estimated_risk||p.risk}<br/><strong>Rollback:</strong> ${p.rollback_plan||''}<br/>${a?`<strong>Approval:</strong> ${a.approval_id} <em>${a.status}</em>`:''}</div>`; } else { rb.innerHTML='';}
   out.scrollIntoView({behavior:'smooth'});
+}
+function setCfBadge(text, ok){
+  const b=document.getElementById('cf-status-badge'); b.innerText=text;
+  b.className='badge '+(ok===true?'badge-green':(ok===false?'badge-red':'badge-yellow'));
+}
+function renderInvestigation(inv){
+  const box=document.getElementById('cf-investigation');
+  if(!inv||!inv.findings||!inv.findings.length){
+    box.innerHTML='<div class="item-box">No safe code-level remediation identified. '+esc((inv&&inv.no_fix_reason)||'')+'</div>'; return;
+  }
+  box.innerHTML='<div style="font-size:.85rem;color:var(--text-muted);margin-bottom:6px"><strong>Code Evidence</strong> — likely responsible lines in cloud-rca-demo-app:</div>'+inv.findings.map(f=>`<div class="evidence-box"><strong>${esc(f.file)}:${f.start_line}</strong> <code>${esc(f.snippet)}</code><br/><span style="color:var(--text-muted)">${esc(f.reason)}</span><br/><span style="font-size:.75rem;color:var(--text-muted)">Test: ${esc(f.related_test||'')}</span></div>`).join('');
+}
+function colorDiff(patch){
+  const NL=String.fromCharCode(10);
+  return esc(patch||'').split(NL).map(l=>{
+    if(l.startsWith('+++')||l.startsWith('---')||l.startsWith('@@')) return `<span style="color:var(--accent-cyan)">${l}</span>`;
+    if(l.startsWith('+')) return `<span style="color:var(--accent-green)">${l}</span>`;
+    if(l.startsWith('-')) return `<span style="color:var(--accent-red)">${l}</span>`;
+    return `<span style="color:var(--text-muted)">${l}</span>`;
+  }).join(NL);
+}
+async function generateFix(regen){
+  if(!LAST_INCIDENT){ alert('Run live RCA first'); return; }
+  setCfBadge(regen?'Regenerating…':'Generating fix…');
+  const data=await (await fetch('/api/incidents/'+LAST_INCIDENT+'/generate-fix',{method:'POST'})).json();
+  if(data.investigation) renderInvestigation(data.investigation);
+  const dw=document.getElementById('cf-diff-wrap'), nf=document.getElementById('cf-no-fix');
+  if(data.proposal){
+    const p=data.proposal;
+    dw.style.display='block'; nf.style.display='none';
+    document.getElementById('cf-diff').innerHTML=colorDiff(p.patch);
+    document.getElementById('cf-files').innerText=p.files_changed.join(', ')+' (+'+p.lines_added+' -'+p.lines_removed+')';
+    document.getElementById('cf-meta').innerHTML=
+      `<div><strong>Reason:</strong> ${esc(p.reasoning_summary)}</div>`+
+      `<div><strong>Risk:</strong> ${esc(p.risk)} · <strong>Tests:</strong> ${p.tests_to_run.map(esc).join(', ')}</div>`+
+      `<div><strong>Patch SHA256:</strong> <code>${esc(p.patch_sha256.slice(0,16))}…</code> (approval binds to full hash)</div>`;
+    document.getElementById('cf-lifecycle').innerText='Status: '+data.fix_status+(data.approval?(' · Approval '+data.approval.approval_id+' '+data.approval.status):'');
+    setCfBadge(data.fix_status);
+  } else {
+    dw.style.display='none'; nf.style.display='block';
+    nf.innerText=data.no_fix_reason||data.error||'No safe code-level remediation identified.';
+    document.getElementById('cf-lifecycle').innerText='Status: '+data.fix_status;
+    setCfBadge(data.fix_status, false);
+  }
+  fetchLogs();
+}
+async function approveFixPR(){
+  if(!LAST_INCIDENT) return;
+  const msg=document.getElementById('cf-msg').value.trim();
+  const btn=document.getElementById('cf-approve-btn'); btn.disabled=true; btn.innerText='Approving…';
+  let r=await fetch('/api/incidents/'+LAST_INCIDENT+'/fix/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
+  let d=await r.json();
+  if(!r.ok){ document.getElementById('cf-lifecycle').innerText='Approve failed: '+(d.detail||r.status); btn.disabled=false; btn.innerText='Approve & Create PR'; return; }
+  if(!confirm('Create branch, apply patch, run tests and open PR for '+LAST_INCIDENT+'?')){ btn.disabled=false; btn.innerText='Approve & Create PR'; return; }
+  btn.innerText='Applying… (branch, tests, push, PR)';
+  document.getElementById('cf-lifecycle').innerText='Status: Approved — applying approved patch…';
+  r=await fetch('/api/incidents/'+LAST_INCIDENT+'/fix/apply',{method:'POST'});
+  d=await r.json();
+  await refreshFixStatus();
+  btn.disabled=false; btn.innerText='Approve & Create PR';
+  fetchLogs();
+}
+async function rejectFix(){
+  if(!LAST_INCIDENT) return;
+  const msg=document.getElementById('cf-msg').value.trim();
+  if(!confirm('Reject this code fix?')) return;
+  await fetch('/api/incidents/'+LAST_INCIDENT+'/fix/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
+  await refreshFixStatus(); fetchLogs();
+}
+async function refreshFixStatus(){
+  if(!LAST_INCIDENT) return;
+  const r=await fetch('/api/incidents/'+LAST_INCIDENT+'/fix');
+  if(!r.ok) return;
+  const d=await r.json(); const job=d.job;
+  const good=d.fix_status==='PR Created', bad=(d.fix_status==='Failed'||d.fix_status==='Rejected');
+  setCfBadge(d.fix_status, good?true:(bad?false:undefined));
+  document.getElementById('cf-lifecycle').innerText='Status: '+d.fix_status+(job.error?(' — '+job.error):'');
+  const pr=document.getElementById('cf-pr');
+  if(job.pr_url){ pr.innerHTML=`<div class="item-box" style="border-left-color:var(--accent-green)"><strong>Branch:</strong> ${esc(job.branch||'')} · <strong>Commit:</strong> ${esc(job.commit||'')} · <strong>PR:</strong> #${job.pr_number||''} <a href="${esc(job.pr_url)}" target="_blank" style="color:var(--accent-cyan)">View Pull Request</a></div>`; }
+  else if(job.branch){ pr.innerHTML=`<div class="item-box"><strong>Branch:</strong> ${esc(job.branch)}${job.commit?(' · <strong>Commit:</strong> '+esc(job.commit)):''}</div>`; }
+  else{ pr.innerHTML=''; }
+  const t=document.getElementById('cf-tests');
+  if(job.test_output){ t.innerHTML='<strong>Test Results:</strong><pre style="background:#020617;border:1px solid var(--border-color);border-radius:6px;padding:10px;max-height:220px;overflow:auto;font-size:.75rem;white-space:pre-wrap">'+esc(job.test_output.slice(-2000))+'</pre>'; }
 }
 setInterval(fetchLogs,3000); window.onload=()=>{loadIncidents();fetchLogs();};
 </script>
@@ -438,13 +620,21 @@ import uuid
 
 SIMULATED_LOGS = []  # in-memory, also appended to data/audit.log via audit_log
 LATEST_SIMULATED_FILE = None
+LATEST_SCENARIO = None
+# scenario -> static incident file (None = evidence built purely from live logs)
 SCENARIO_MAP = {
-    "db-timeout": ("incident_001_db_timeout.json", "DATABASE_CONNECTION_TIMEOUT", "ERROR", "could not connect to orders-db.internal:5432 after 5000ms"),
-    "pool-exhaustion": ("incident_002_pool_exhaustion.json", "DATABASE_CONNECTION_POOL_EXHAUSTED", "ERROR", "pool_usage=100% waiting_threads=45"),
-    "bad-deployment": ("incident_003_bad_deployment.json", "NULL_POINTER_EXCEPTION", "ERROR", "NullPointerException in PaymentProcessor.java:84"),
-    "dependency-failure": ("incident_004_dependency_outage.json", "DOWNSTREAM_DEPENDENCY_FAILURE", "ERROR", "dependency=orders-service status=503"),
-    "traffic-overload": ("incident_005_traffic_overload.json", "REQUEST_QUEUE_FULL_THROTTLED", "WARNING", "max_concurrent_requests_exceeded instances=10"),
-    "config-error": ("incident_006_config_regression.json", "CONFIGURATION_REGRESSION", "ERROR", "Required environment variable PAYMENT_GATEWAY_API_KEY is missing"),
+    "db-timeout": "incident_001_db_timeout.json",
+    "pool-exhaustion": "incident_002_pool_exhaustion.json",
+    "bad-deployment": "incident_003_bad_deployment.json",
+    "dependency-failure": "incident_004_dependency_outage.json",
+    "traffic-overload": "incident_005_traffic_overload.json",
+    "config-error": "incident_006_config_regression.json",
+    "memory-leak": None,
+    "cpu-exhaustion": None,
+    "auth-failure": None,
+    "network-timeout": None,
+    "malformed-payload": None,
+    "rate-limit": None,
 }
 
 @app.get("/api/logs/live")
@@ -473,55 +663,79 @@ def clear_logs():
     LATEST_SIMULATED_FILE = None
     return {"cleared": True}
 
+@app.get("/api/logs/summary")
+def logs_summary():
+    """Dashboard summary row computed from the live stream (Part 3)."""
+    from tools.live_log_generator import summarize
+    summary = summarize(SIMULATED_LOGS)
+    summary["error_code_counts"] = {}
+    try:
+        from collections import Counter
+        summary["error_code_counts"] = dict(Counter(
+            l.get("error_code") for l in SIMULATED_LOGS if l.get("error_code")))
+    except Exception:
+        pass
+    return summary
+
 @app.post("/api/simulate/{scenario}")
 def simulate_error(scenario: str):
-    if scenario not in SCENARIO_MAP:
-        raise HTTPException(status_code=400, detail=f"Unknown scenario {scenario}. Choose {list(SCENARIO_MAP.keys())}")
-    incident_file, code, severity, msg = SCENARIO_MAP[scenario]
-    global LATEST_SIMULATED_FILE
+    from tools.live_log_generator import SCENARIO_SPECS, generate_logs, summarize
+    if scenario not in SCENARIO_SPECS:
+        raise HTTPException(status_code=400, detail=f"Unknown scenario {scenario}. Choose {sorted(SCENARIO_SPECS)}")
+    spec = SCENARIO_SPECS[scenario]
+    incident_file = SCENARIO_MAP.get(scenario)
+    global LATEST_SIMULATED_FILE, LATEST_SCENARIO
     LATEST_SIMULATED_FILE = incident_file
-    now = datetime.now(timezone.utc).isoformat()
-    # inject 4-6 live log lines to mimic streaming errors
+    LATEST_SCENARIO = scenario
+    incident_id = f"INC-LIVE-{spec['incident_type']}"
+    # Baseline + incident phases streamed as structured logs
+    new_logs = generate_logs(scenario, incident_id=incident_id)
     bucket = None
     try:
         from tools.gcs_tools import get_log_bucket
         bucket = get_log_bucket()
     except Exception:
         bucket = None
-    for i in range(5):
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "severity": severity,
-            "error_code": code,
-            "message": f"{code} {msg} ({i+1}/5) scenario={scenario}",
-            "trace_id": f"trace-sim-{uuid.uuid4().hex[:8]}",
-            "service": "checkout-service",
-        }
-        SIMULATED_LOGS.append(entry)
-        # Bucket: append to GCS as durable log bucket storage
-        if bucket:
-            try:
-                from tools.gcs_tools import upload_jsonl_to_bucket
-                upload_jsonl_to_bucket(bucket, f"logs/live/{incident_file}.jsonl", entry)
+    SIMULATED_LOGS.extend(new_logs)
+    if bucket:
+        try:
+            from tools.gcs_tools import upload_jsonl_to_bucket
+            key = incident_file or f"live-{scenario}.json"
+            for entry in new_logs:
+                upload_jsonl_to_bucket(bucket, f"logs/live/{key}.jsonl", entry)
                 upload_jsonl_to_bucket(bucket, "logs/live/central.jsonl", entry)
-            except Exception:
-                pass
-    # also load static incident file for RCA context
-    audit_log("SIMULATE", incident_file, "web-user", code, "checkout-service")
-    return {"simulated": True, "scenario": scenario, "incident_file": incident_file, "logs_injected": 5, "bucket": bucket or "local"}
+        except Exception:
+            pass
+    audit_log("SIMULATE", incident_file or scenario, "web-user", spec["error_code"], spec["service"])
+    return {"simulated": True, "scenario": scenario, "incident_id": incident_id,
+            "incident_file": incident_file, "logs_injected": len(new_logs),
+            "bucket": bucket or "local", "summary": summarize(new_logs)}
 
 @app.post("/api/rca/live")
 async def run_live_rca():
-    # Run RCA on latest simulated incident (or fallback to currentIncident)
-    incident_file = LATEST_SIMULATED_FILE or "incident_001_db_timeout.json"
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    file_path = os.path.join(base_dir, "data", "incidents", incident_file)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Simulated incident file not found")
-    with open(file_path) as f:
-        data = json.load(f)
+    # Fresh investigation from the LIVE log stream (Part 4). Static files only
+    # supply deployments/traces/dependencies; counts, rates and latencies come
+    # from the actual streamed logs. Scenarios without static files are built
+    # purely from live evidence.
     from schemas.evidence import IncidentEvidence
-    ev = IncidentEvidence(**data)
+    from tools.live_evidence import merge_static_with_live, build_evidence_from_logs
+    scenario = LATEST_SCENARIO
+    incident_file = LATEST_SIMULATED_FILE
+    live_logs = [l for l in SIMULATED_LOGS
+                 if not scenario or l.get("scenario") == scenario] or SIMULATED_LOGS
+    if incident_file:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        file_path = os.path.join(base_dir, "data", "incidents", incident_file)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Simulated incident file not found")
+        with open(file_path) as f:
+            data = json.load(f)
+        data = merge_static_with_live(data, live_logs)
+        ev = IncidentEvidence(**data)
+    elif scenario:
+        ev = build_evidence_from_logs(scenario, live_logs)
+    else:
+        raise HTTPException(status_code=400, detail="Simulate an incident first (POST /api/simulate/{scenario})")
     # Heavy workflow in a thread — polls and clicks keep working while it runs
     state, plan, cat = await asyncio.to_thread(_investigate_and_plan, ev)
     approval = global_approval_manager.create_request(
@@ -537,7 +751,227 @@ async def run_live_rca():
     result["timeline"] = [t.model_dump() for t in state.final_report.timeline]
     # add simulated logs hint
     result["live_logs_count"] = len(SIMULATED_LOGS)
+    # remember validated RCA for the code-fix pipeline (Part 5+)
+    _best_cat, _best_conf = None, 0.0
+    for _v in state.validated_hypotheses:
+        if _v.accepted:
+            _h = next((x for x in state.hypotheses if x.hypothesis_id == _v.hypothesis_id), None)
+            if _h and _v.adjusted_confidence >= _best_conf:
+                _best_cat, _best_conf = _h.root_cause_category, _v.adjusted_confidence
+    LAST_RCA[ev.incident_id] = {
+        "root_cause_category": _best_cat or (state.hypotheses[0].root_cause_category if state.hypotheses else "unknown"),
+        "root_cause": state.final_report.root_cause,
+        "confidence": state.final_report.confidence,
+        "supporting_evidence": state.final_report.supporting_evidence,
+        "contradictory_evidence": state.final_report.contradictory_evidence,
+        "service": ev.service_name,
+    }
     return result
+
+# --- Code fix + PR pipeline (Parts 5-15, 19) ---
+from schemas.code_fix import FixJob, FixStatus
+
+FIX_JOBS = {}  # incident_id -> {"job": FixJob, "proposal": PatchProposal|None, "approval_id": str|None}
+LAST_RCA = {}  # incident_id -> validated RCA summary for code mapping
+
+
+def _get_rca(incident_id: str) -> dict:
+    rca = LAST_RCA.get(incident_id)
+    if not rca:
+        raise HTTPException(status_code=400, detail=f"No validated RCA for {incident_id}: click 'Do RCA (Live)' first")
+    return rca
+
+
+def _demo_repo() -> str:
+    import os as _os
+    return _os.getenv("DEMO_APP_PATH") or os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cloud-rca-demo-app")
+
+
+@app.post("/api/incidents/{incident_id}/analyze-code")
+async def analyze_code(incident_id: str):
+    from agents.code_investigation_agent.agent import CodeInvestigationAgent
+    rca = _get_rca(incident_id)
+    inv = await asyncio.to_thread(
+        CodeInvestigationAgent().investigate, incident_id, rca["root_cause_category"])
+    audit_log("CODE_INVESTIGATED", incident_id, "CodeInvestigationAgent",
+              rca["root_cause_category"], _demo_repo())
+    return inv.model_dump()
+
+
+@app.post("/api/incidents/{incident_id}/generate-fix")
+async def generate_fix(incident_id: str):
+    from agents.code_investigation_agent.agent import CodeInvestigationAgent
+    from agents.patch_agent.agent import PatchAgent
+    rca = _get_rca(incident_id)
+    inv = await asyncio.to_thread(
+        CodeInvestigationAgent().investigate, incident_id, rca["root_cause_category"])
+    if inv.no_fix_reason or not inv.findings:
+        job = FixJob(incident_id=incident_id, status=FixStatus.SUGGESTED,
+                     root_cause_category=rca["root_cause_category"],
+                     error=inv.no_fix_reason or "No safe code-level remediation identified.")
+        FIX_JOBS[incident_id] = {"job": job, "proposal": None, "approval_id": None,
+                                 "investigation": inv.model_dump()}
+        return {"investigation": inv.model_dump(), "proposal": None,
+                "fix_status": job.status.value, "no_fix_reason": job.error}
+    try:
+        proposal = await asyncio.to_thread(
+            PatchAgent().generate, incident_id, rca["root_cause_category"])
+    except ValueError as e:
+        job = FixJob(incident_id=incident_id, status=FixStatus.FAILED,
+                     root_cause_category=rca["root_cause_category"], error=str(e))
+        FIX_JOBS[incident_id] = {"job": job, "proposal": None, "approval_id": None,
+                                 "investigation": inv.model_dump()}
+        return {"investigation": inv.model_dump(), "proposal": None,
+                "fix_status": job.status.value, "error": str(e)}
+    approval = global_approval_manager.create_request(
+        incident_id=incident_id, action="code_fix_pr",
+        target_resource=f"repo:cloud-rca-demo-app files:{','.join(proposal.files_changed)}",
+        rationale=proposal.reasoning_summary, root_cause=rca["root_cause"],
+        confidence=rca["confidence"], risk=proposal.risk,
+        expected_impact=proposal.summary, rollback_plan="Close PR unmerged; delete fix branch",
+        action_type="CODE_CHANGE", patch_sha256=proposal.patch_sha256)
+    job = FixJob(incident_id=incident_id, status=FixStatus.WAITING_FOR_APPROVAL,
+                 root_cause_category=rca["root_cause_category"],
+                 patch_sha256=proposal.patch_sha256, approval_id=approval.approval_id)
+    FIX_JOBS[incident_id] = {"job": job, "proposal": proposal,
+                             "approval_id": approval.approval_id,
+                             "investigation": inv.model_dump()}
+    audit_log("FIX_PROPOSED", incident_id, "PatchAgent", "code_fix_pr",
+              approval.target_resource, approval_id=approval.approval_id,
+              result=proposal.patch_sha256[:12])
+    return {"investigation": inv.model_dump(), "proposal": proposal.model_dump(),
+            "approval": approval.model_dump(), "fix_status": job.status.value}
+
+
+@app.get("/api/incidents/{incident_id}/fix")
+def get_fix(incident_id: str):
+    entry = FIX_JOBS.get(incident_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No code fix proposed yet for this incident")
+    out = {"fix_status": entry["job"].status.value, "job": entry["job"].model_dump(),
+           "investigation": entry.get("investigation")}
+    if entry.get("proposal") is not None:
+        out["proposal"] = entry["proposal"].model_dump()
+    if entry.get("approval_id"):
+        out["approval"] = global_approval_manager.get(entry["approval_id"]).model_dump()
+    return out
+
+
+@app.post("/api/incidents/{incident_id}/fix/approve")
+def approve_fix(incident_id: str, body: dict = None):
+    entry = FIX_JOBS.get(incident_id)
+    if not entry or not entry.get("approval_id"):
+        raise HTTPException(status_code=404, detail="No pending code fix approval for this incident")
+    msg = (body or {}).get("message", "") if isinstance(body, dict) else ""
+    req = global_approval_manager.get(entry["approval_id"])
+    if not req or req.status.value != "PENDING":
+        raise HTTPException(status_code=409, detail="Approval is no longer pending")
+    # hash binding: approval must match the CURRENT proposal (regeneration invalidates)
+    if req.patch_sha256 != entry["proposal"].patch_sha256:
+        raise HTTPException(status_code=409, detail="Patch changed since approval request: re-approval required")
+    req = global_approval_manager.approve(req.approval_id, message=msg)
+    entry["job"].status = FixStatus.APPROVED
+    audit_log("FIX_APPROVED", incident_id, "human-operator", "code_fix_pr",
+              req.target_resource, approval_id=req.approval_id, result=msg)
+    return {"fix_status": entry["job"].status.value, "approval": req.model_dump()}
+
+
+@app.post("/api/incidents/{incident_id}/fix/reject")
+def reject_fix(incident_id: str, body: dict = None):
+    entry = FIX_JOBS.get(incident_id)
+    if not entry or not entry.get("approval_id"):
+        raise HTTPException(status_code=404, detail="No pending code fix approval for this incident")
+    msg = (body or {}).get("message", "") if isinstance(body, dict) else ""
+    req = global_approval_manager.reject(entry["approval_id"], message=msg)
+    entry["job"].status = FixStatus.REJECTED
+    audit_log("FIX_REJECTED", incident_id, "human-operator", "code_fix_pr",
+              req.target_resource, approval_id=req.approval_id, result=msg)
+    return {"fix_status": entry["job"].status.value, "approval": req.model_dump()}
+
+
+@app.post("/api/incidents/{incident_id}/fix/apply")
+async def apply_fix(incident_id: str):
+    """Approved pipeline only: hash verify -> branch -> apply -> test -> commit -> push -> PR."""
+    from gitops.branch_manager import create_fix_branch, slugify
+    from gitops.patch_manager import apply_patch
+    from gitops.test_runner import run_tests
+    from gitops.commit_manager import commit_fix, push_branch
+    from gitops.pr_manager import create_pr, pr_title, pr_body
+    from gitops.repository import default_branch
+    entry = FIX_JOBS.get(incident_id)
+    if not entry or not entry.get("proposal"):
+        raise HTTPException(status_code=404, detail="No code fix proposal for this incident")
+    job, proposal = entry["job"], entry["proposal"]
+    req = global_approval_manager.get(entry["approval_id"])
+    if not req or req.status.value != "APPROVED":
+        raise HTTPException(status_code=403, detail="Apply blocked: no APPROVED code-change approval")
+    if req.patch_sha256 != proposal.patch_sha256:
+        job.status = FixStatus.FAILED
+        job.error = "Patch hash mismatch vs approval: re-approval required"
+        raise HTTPException(status_code=409, detail=job.error)
+    repo = _demo_repo()
+    rca = LAST_RCA.get(incident_id, {})
+    try:
+        job.status = FixStatus.APPROVED
+        branch = await asyncio.to_thread(create_fix_branch, repo, incident_id, proposal.root_cause_category)
+        job.branch, job.status = branch, FixStatus.BRANCH_CREATED
+        diffstat = await asyncio.to_thread(apply_patch, repo, proposal.patch, req.patch_sha256)
+        job.status = FixStatus.PATCH_APPLIED
+        job.status = FixStatus.TESTING
+        test_res = await asyncio.to_thread(run_tests, repo, proposal.tests_to_run)
+        job.test_output = test_res["output"]
+        if not test_res["passed"]:
+            job.status = FixStatus.FAILED
+            job.error = "Patch applied. Tests FAILED — PR not created. Branch retained for inspection."
+            audit_log("FIX_TESTS_FAILED", incident_id, "TestRunner", "pytest", repo,
+                      approval_id=req.approval_id, result=test_res["output"][-500:])
+            return {"fix_status": job.status.value, "job": job.model_dump(),
+                    "detail": job.error, "diffstat": diffstat}
+        job.status = FixStatus.TESTS_PASSED
+        commit = await asyncio.to_thread(
+            commit_fix, repo, branch, incident_id, proposal.root_cause_category,
+            req.approval_id, rca.get("confidence", 0.0), proposal.tests_to_run)
+        job.commit, job.status = commit, FixStatus.COMMITTED
+        await asyncio.to_thread(push_branch, repo, branch)
+        job.status = FixStatus.PUSHED
+        base = default_branch(repo)
+        title = pr_title(incident_id, proposal.summary)
+        body = pr_body(incident_id, rca.get("service", "checkout-service"),
+                       rca.get("root_cause", ""), rca.get("confidence", 0.0),
+                       rca.get("supporting_evidence", []), proposal.files_changed,
+                       proposal.risk, req.approval_id)
+        pr = await asyncio.to_thread(create_pr, repo, branch, base, title, body)
+        if pr.get("pr_url"):
+            job.pr_url, job.pr_number = pr["pr_url"], pr.get("pr_number")
+            job.status = FixStatus.PR_CREATED
+        else:
+            job.status, job.error = FixStatus.FAILED, f"PR not created: {pr.get('blocked')}. {pr.get('hint','')}"
+        audit_log("FIX_APPLIED", incident_id, "gitops", "code_fix_pr", repo,
+                  approval_id=req.approval_id, result=f"{job.status.value} {job.pr_url or ''}")
+        return {"fix_status": job.status.value, "job": job.model_dump(), "diffstat": diffstat}
+    except (ValueError, RuntimeError, PermissionError) as e:
+        job.status, job.error = FixStatus.FAILED, str(e)[:500]
+        return {"fix_status": job.status.value, "job": job.model_dump(), "detail": str(e)[:500]}
+
+
+@app.get("/api/incidents/{incident_id}/fix/status")
+def fix_status(incident_id: str):
+    entry = FIX_JOBS.get(incident_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No code fix yet for this incident")
+    return {"fix_status": entry["job"].status.value, "job": entry["job"].model_dump()}
+
+
+@app.get("/api/incidents/{incident_id}/pr")
+def get_pr(incident_id: str):
+    entry = FIX_JOBS.get(incident_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No code fix yet for this incident")
+    job = entry["job"]
+    return {"pr_url": job.pr_url, "pr_number": job.pr_number,
+            "branch": job.branch, "commit": job.commit,
+            "fix_status": job.status.value}
 
 # Keep original analyze endpoint
 
