@@ -235,8 +235,8 @@ async function sendDecision(id, isApprove, action, incident, risk){
   const message=input?input.value.trim():"";
   const verb=isApprove?'APPROVE':'REJECT';
   // Explicit human confirmation — nothing is auto-approved; Enter key alone never submits
-  const detail=(action||'')+(incident?' for '+incident:'')+(risk?' (Risk '+risk+')':'')+(message?'\nNote: '+message:'');
-  if(!confirm(verb+' this remediation?\n\n'+detail)) return;
+  const detail=(action||'')+(incident?' for '+incident:'')+(risk?' (Risk '+risk+')':'')+(message?' -- Note: '+message:'');
+  if(!confirm(verb+' this remediation? -- '+detail)) return;
   const endpoint=isApprove?'/api/approvals/'+id+'/approve':'/api/approvals/'+id+'/reject';
   await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});
   fetchLogs();
