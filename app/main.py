@@ -21,7 +21,48 @@ from memory.schemas import IncidentMemoryRecord
 from memory.postmortem import generate_postmortem
 from orchestration.incident_state_machine import IncidentStateMachine, IncidentState
 from audit.logger import audit_log
+import asyncio
 import time
+
+def _investigate_and_plan(ev):
+    """Blocking multi-agent workflow + remediation plan. Must run in a thread (asyncio.to_thread)."""
+    wf = InvestigationWorkflow()
+    state = wf.run(ev)
+    rem_agent = RemediationAgent()
+    cat = None
+    if state.validated_hypotheses:
+        best = max([v for v in state.validated_hypotheses if v.accepted], key=lambda x: x.adjusted_confidence, default=None)
+        if best:
+            hyp = next((h for h in state.hypotheses if h.hypothesis_id==best.hypothesis_id), None)
+            if hyp:
+                cat = hyp.root_cause_category
+    plan = rem_agent.plan(ev, state.final_report, validated_category=cat)
+    return state, plan, cat
+
+def _execute_and_verify(req, action_params):
+    """Blocking executor + verification + memory. Must run in a thread."""
+    executor = ExecutorAgent()
+    result = executor.execute(req, action_params)
+    audit_log("EXECUTION", req.incident_id, "ExecutorAgent", req.action, req.target_resource, before=result.before_state, after=result.after_state, approval_id=req.approval_id, result=result.status.value)
+    verifier = VerificationAgent()
+    metrics_before = {"error_rate_pct": 20, "latency_p95_ms": 3000}
+    metrics_after = {"error_rate_pct": 0.5 if result.status.value=="SUCCESS" else 18, "latency_p95_ms": 180 if result.status.value=="SUCCESS" else 2900}
+    verification = verifier.verify(req.incident_id, result, metrics_before, metrics_after)
+    audit_log("VERIFICATION", req.incident_id, "VerificationAgent", verification.verification_status.value, req.target_resource, before=metrics_before, after=metrics_after)
+    try:
+        store = MemoryStore()
+        rec = IncidentMemoryRecord(
+            incident_id=req.incident_id, service=req.target_resource.split("/")[-1] if "/" in req.target_resource else "unknown",
+            symptoms=[], timeline=[], root_cause=req.root_cause, root_cause_category="unknown",
+            supporting_evidence=[], blast_radius={}, remediation=action_params, approval_outcome=req.status.value,
+            execution_result=result.model_dump(), verification_result=verification.model_dump(),
+            final_status=verification.verification_status.value, timestamps={}, confidence=req.confidence
+        )
+        store.save(rec)
+        postmortem = generate_postmortem(rec)
+    except Exception as e:
+        postmortem = {"error": str(e)}
+    return result, verification, postmortem
 
 app = FastAPI(title="Cloud Incident RCA Agent Dashboard - Phase 4")
 
@@ -257,14 +298,14 @@ def list_incidents():
 
 
 @app.get("/api/analyze/{incident_filename}")
-def analyze_incident_api(incident_filename: str):
+async def analyze_incident_api(incident_filename: str):
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     file_path = os.path.join(base_dir, "data", "incidents", incident_filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Incident file not found")
 
     agent = CloudRCAAgent()
-    result = agent.analyze(file_path)
+    result = await asyncio.to_thread(agent.analyze, file_path)
     return result.model_dump()
 
 
@@ -286,7 +327,7 @@ def ready():
     return {"ready": checks["config_loaded"], "checks": checks}
 
 @app.post("/incidents/{incident_id}/remediation/plan")
-def create_remediation_plan(incident_id: str):
+async def create_remediation_plan(incident_id: str):
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     file_path = os.path.join(base_dir, "data", "incidents", f"{incident_id}.json")
     # Try mapping incident_id like INC-003-BAD-DEPLOYMENT to file
@@ -303,19 +344,8 @@ def create_remediation_plan(incident_id: str):
         data = _json.load(f)
     from schemas.evidence import IncidentEvidence
     ev = IncidentEvidence(**data)
-    wf = InvestigationWorkflow()
-    state = wf.run(ev)
-    # Build remediation plan from validated RCA
-    rem_agent = RemediationAgent()
-    # Use top validated hypothesis category
-    cat = None
-    if state.validated_hypotheses:
-        best = max([v for v in state.validated_hypotheses if v.accepted], key=lambda x: x.adjusted_confidence, default=None)
-        if best:
-            hyp = next((h for h in state.hypotheses if h.hypothesis_id==best.hypothesis_id), None)
-            if hyp:
-                cat = hyp.root_cause_category
-    plan = rem_agent.plan(ev, state.final_report, validated_category=cat)
+    # Heavy multi-agent workflow runs in a thread so polls/clicks stay responsive
+    state, plan, cat = await asyncio.to_thread(_investigate_and_plan, ev)
     # Create approval request via manager
     approval = global_approval_manager.create_request(
         incident_id=incident_id, action=plan.recommended_action, target_resource=plan.target_resource or f"projects/{ev.project_id}/locations/{ev.region}/services/{ev.service_name}",
@@ -369,35 +399,13 @@ def cancel_request(approval_id: str):
 
 @app.post("/approvals/{approval_id}/execute")
 @app.post("/api/approvals/{approval_id}/execute")
-def execute_approval(approval_id: str, action_params: dict = None):
+async def execute_approval(approval_id: str, action_params: dict = None):
     action_params = action_params or {}
     req = global_approval_manager.get(approval_id)
     if not req:
         raise HTTPException(status_code=404, detail="Approval not found")
-    executor = ExecutorAgent()
-    result = executor.execute(req, action_params)
-    audit_log("EXECUTION", req.incident_id, "ExecutorAgent", req.action, req.target_resource, before=result.before_state, after=result.after_state, approval_id=approval_id, result=result.status.value)
-    # Verification step (simple metrics stub)
-    verifier = VerificationAgent()
-    # Use dummy metrics before/after for demo; in prod fetch real metrics
-    metrics_before = {"error_rate_pct": 20, "latency_p95_ms": 3000}
-    metrics_after = {"error_rate_pct": 0.5 if result.status.value=="SUCCESS" else 18, "latency_p95_ms": 180 if result.status.value=="SUCCESS" else 2900}
-    verification = verifier.verify(req.incident_id, result, metrics_before, metrics_after)
-    audit_log("VERIFICATION", req.incident_id, "VerificationAgent", verification.verification_status.value, req.target_resource, before=metrics_before, after=metrics_after)
-    # Store memory
-    try:
-        store = MemoryStore()
-        rec = IncidentMemoryRecord(
-            incident_id=req.incident_id, service=req.target_resource.split("/")[-1] if "/" in req.target_resource else "unknown",
-            symptoms=[], timeline=[], root_cause=req.root_cause, root_cause_category="unknown",
-            supporting_evidence=[], blast_radius={}, remediation=action_params, approval_outcome=req.status.value,
-            execution_result=result.model_dump(), verification_result=verification.model_dump(),
-            final_status=verification.verification_status.value, timestamps={}, confidence=req.confidence
-        )
-        store.save(rec)
-        postmortem = generate_postmortem(rec)
-    except Exception as e:
-        postmortem = {"error": str(e)}
+    # Cloud API calls run in a thread so the event loop stays free
+    result, verification, postmortem = await asyncio.to_thread(_execute_and_verify, req, action_params)
     return {"execution": result.model_dump(), "verification": verification.model_dump(), "postmortem": postmortem}
 
 # --- Live simulation + logs (for website button demo) ---
@@ -483,7 +491,7 @@ def list_pending_approvals():
     return [r.model_dump() for r in global_approval_manager.list_pending()]
 
 @app.post("/api/rca/live")
-def run_live_rca():
+async def run_live_rca():
     # Run RCA on latest simulated incident (or fallback to currentIncident)
     incident_file = LATEST_SIMULATED_FILE or "incident_001_db_timeout.json"
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -494,18 +502,8 @@ def run_live_rca():
         data = json.load(f)
     from schemas.evidence import IncidentEvidence
     ev = IncidentEvidence(**data)
-    wf = InvestigationWorkflow()
-    state = wf.run(ev)
-    # Build remediation + approval for live flow
-    rem = RemediationAgent()
-    cat = None
-    if state.validated_hypotheses:
-        best = max([v for v in state.validated_hypotheses if v.accepted], key=lambda x: x.adjusted_confidence, default=None)
-        if best:
-            hyp = next((h for h in state.hypotheses if h.hypothesis_id==best.hypothesis_id), None)
-            if hyp:
-                cat = hyp.root_cause_category
-    plan = rem.plan(ev, state.final_report, validated_category=cat)
+    # Heavy workflow in a thread — polls and clicks keep working while it runs
+    state, plan, cat = await asyncio.to_thread(_investigate_and_plan, ev)
     approval = global_approval_manager.create_request(
         incident_id=ev.incident_id, action=plan.recommended_action, target_resource=plan.target_resource,
         rationale=plan.expected_effect, root_cause=plan.root_cause, confidence=plan.confidence, risk=plan.estimated_risk.value,
