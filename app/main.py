@@ -142,31 +142,52 @@ async function simulate(scenario){
   fetchLogs();
 }
 async function clearLogs(){ await fetch('/api/logs/clear',{method:'POST'}); document.getElementById('live-logs').innerHTML='Logs cleared. Ready for new simulation.'; liveIncidentFile=null; }
+let _pollInFlight=false, _lastLogSig='', _lastApprSig='';
+function _approvalCard(a, accent){
+  const border=accent?'var(--accent-cyan)':'var(--border-color)';
+  const pad=accent?'4px 10px':'2px 8px';
+  return `<div style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:${pad};border-radius:4px;background:var(--accent-green);border:none;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:${pad};border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Reject</button></div></div>`;
+}
 async function fetchLogs(){
-  const res=await fetch('/api/logs/live?limit=80'); const logs=await res.json();
-  const box=document.getElementById('live-logs');
-  if(!logs.length){ box.innerHTML='<span class=\"log-info\">No errors yet — click 🧪 Simulate Errors above</span>'; return; }
-  box.innerHTML=logs.map(l=>{
-    const cls=l.severity==='ERROR'?'log-error':l.severity==='WARNING'?'log-warn':'log-info';
-    return `<div class="log-line ${cls}">[${l.timestamp}] <strong>${l.severity}</strong> ${l.error_code||''} ${l.message} <span style="opacity:.6">trace=${l.trace_id||'none'}</span></div>`;
-  }).join('');
-  box.scrollTop=box.scrollHeight;
-  // approval poll — preserve typed message across re-renders, auto-focus new inputs
-  fetch('/api/approvals/pending').then(r=>r.json()).then(d=>{
-    const ab=document.getElementById('approval-box');
-    if(d.length){
-      const prevFocus=document.activeElement&&document.activeElement.id?document.activeElement.id:null;
-      const prevVals={}; document.querySelectorAll('.appr-msg').forEach(el=>{prevVals[el.dataset.approvalId]=el.value;});
+  if(_pollInFlight) return;  // never stack overlapping polls — this was freezing the page
+  _pollInFlight=true;
+  try{
+    const res=await fetch('/api/logs/live?limit=80'); const logs=await res.json();
+    const sig=logs.length+'|'+(logs.length?logs[logs.length-1].timestamp+logs[logs.length-1].message:'empty');
+    if(sig!==_lastLogSig){
+      _lastLogSig=sig;
+      const box=document.getElementById('live-logs');
+      if(!logs.length){ box.innerHTML='<span class="log-info">No errors yet — click 🧪 Simulate Errors above</span>'; }
+      else{
+        // only force-scroll if user is already near the bottom, so reading isn't yanked away
+        const nearBottom=(box.scrollHeight-box.scrollTop-box.clientHeight)<60;
+        box.innerHTML=logs.map(l=>{
+          const cls=l.severity==='ERROR'?'log-error':l.severity==='WARNING'?'log-warn':'log-info';
+          return `<div class="log-line ${cls}">[${l.timestamp}] <strong>${l.severity}</strong> ${l.error_code||''} ${l.message} <span style="opacity:.6">trace=${l.trace_id||'none'}</span></div>`;
+        }).join('');
+        if(nearBottom) box.scrollTop=box.scrollHeight;
+      }
+    }
+    const pr=await fetch('/api/approvals/pending'); const d=await pr.json();
+    const asig=d.map(a=>a.approval_id+':'+a.status).join(',');
+    if(asig!==_lastApprSig){
+      const firstLoad=_lastApprSig==='';
+      _lastApprSig=asig;
+      const ab=document.getElementById('approval-box');
       const prevIds=new Set([...document.querySelectorAll('.appr-msg')].map(el=>el.dataset.approvalId));
-      ab.innerHTML=d.map(a=>`<div style="padding:6px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:2px 8px;border-radius:4px;background:var(--accent-green);border:none;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:2px 8px;border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Reject</button></div></div>`).join('');
-      // restore in-progress typing
-      document.querySelectorAll('.appr-msg').forEach(el=>{ if(prevVals[el.dataset.approvalId]!==undefined) el.value=prevVals[el.dataset.approvalId]; });
-      // focus first new approval input
+      const typing=document.activeElement&&document.activeElement.classList&&document.activeElement.classList.contains('appr-msg');
+      if(!d.length){ ab.innerHTML='No pending approvals'; }
+      else{
+        // never rebuild while the user is typing — new approvals are appended, not re-rendered
+        if(typing){ /* skip: keep DOM + focus + text untouched */ }
+        else{ ab.innerHTML=d.map(a=>_approvalCard(a,false)).join(''); }
+      }
+      // focus ONLY a brand-new approval input, once — never steal focus otherwise
       const fresh=[...document.querySelectorAll('.appr-msg')].find(el=>!prevIds.has(el.dataset.approvalId));
-      if(fresh){ fresh.focus(); }
-      else if(prevFocus&&document.getElementById(prevFocus)){ const el=document.getElementById(prevFocus); el.focus(); el.setSelectionRange(el.value.length,el.value.length); }
-    } else {ab.innerHTML='No pending approvals';}
-  });
+      if(fresh&&(firstLoad||!typing)) fresh.focus();
+    }
+  }catch(e){ /* poll failure must never break the page */ }
+  finally{ _pollInFlight=false; }
 }
 async function sendDecision(id, isApprove, action, incident, risk){
   const input=document.getElementById('msg-'+id);
@@ -193,8 +214,8 @@ async function runLiveRCA(){
   const rca=data.root_cause?data:data;
   // For live, data contains remediation_plan+approval
   renderRCA(rca.root_cause?rca:{...rca, ...rca.remediation_plan});
-  // If live returned approval, show it with message box + focus
-  if(data.approval){ const ap=data.approval; document.getElementById('approval-box').innerHTML=`<div style="padding:6px;border:1px solid var(--accent-cyan);border-radius:6px"><strong>New Approval ${ap.approval_id}</strong><br/>${ap.action} Risk ${ap.risk}<br/><input class="appr-msg" data-approval-id="${ap.approval_id}" id="msg-${ap.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${ap.approval_id}',true,'${ap.action}','${ap.incident_id}','${ap.risk}')" style="padding:4px 10px;background:var(--accent-green);border:none;border-radius:4px;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${ap.approval_id}',false,'${ap.action}','${ap.incident_id}','${ap.risk}')" style="margin-left:6px;padding:4px 10px;background:var(--accent-red);border:none;border-radius:4px;color:#fff;cursor:pointer">Reject</button></div></div>`; const inp=document.getElementById('msg-'+ap.approval_id); if(inp) inp.focus(); }
+  // If live returned approval, show it with message box + focus (sync poll signature so next poll won't rebuild it)
+  if(data.approval){ const ap=data.approval; _lastApprSig=ap.approval_id+':'+ap.status; document.getElementById('approval-box').innerHTML=_approvalCard(ap,true); const inp=document.getElementById('msg-'+ap.approval_id); if(inp) inp.focus(); }
   btn.disabled=false; btn.innerText='🧠 Do RCA (Live)';
   fetchLogs();
 }
@@ -216,7 +237,7 @@ function renderRCA(data){
   if(data.remediation_plan||data.approval){ const p=data.remediation_plan||data; const a=data.approval; rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#020617"><strong>Remediation:</strong> ${p.recommended_action||p.action} (${p.mitigation_type||''}) Risk ${p.estimated_risk||p.risk}<br/><strong>Rollback:</strong> ${p.rollback_plan||''}<br/>${a?`<strong>Approval:</strong> ${a.approval_id} <em>${a.status}</em>`:''}</div>`; } else { rb.innerHTML='';}
   out.scrollIntoView({behavior:'smooth'});
 }
-setInterval(fetchLogs,1000); window.onload=()=>{loadIncidents();fetchLogs();};
+setInterval(fetchLogs,3000); window.onload=()=>{loadIncidents();fetchLogs();};
 </script>
 </body>
 </html>
