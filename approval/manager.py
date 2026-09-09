@@ -42,7 +42,7 @@ class ApprovalManager:
             req.status = ApprovalStatus.EXPIRED
         return req
 
-    def approve(self, approval_id: str, approver: str = "human-operator") -> Optional[ApprovalRequest]:
+    def approve(self, approval_id: str, approver: str = "human-operator", message: Optional[str] = None) -> Optional[ApprovalRequest]:
         req = self.get(approval_id)
         if not req:
             return None
@@ -51,10 +51,11 @@ class ApprovalManager:
         req.status = ApprovalStatus.APPROVED
         req.decided_at = datetime.now(timezone.utc).isoformat()
         req.decided_by = approver
-        logger.info(f"Approved {approval_id} by {approver}")
+        req.decided_message = (message or "").strip() or None
+        logger.info(f"Approved {approval_id} by {approver}: {req.decided_message}")
         return req
 
-    def reject(self, approval_id: str, approver: str = "human-operator") -> Optional[ApprovalRequest]:
+    def reject(self, approval_id: str, approver: str = "human-operator", message: Optional[str] = None) -> Optional[ApprovalRequest]:
         req = self.get(approval_id)
         if not req:
             return None
@@ -63,6 +64,8 @@ class ApprovalManager:
         req.status = ApprovalStatus.REJECTED
         req.decided_at = datetime.now(timezone.utc).isoformat()
         req.decided_by = approver
+        req.decided_message = (message or "").strip() or None
+        logger.info(f"Rejected {approval_id} by {approver}: {req.decided_message}")
         return req
 
     def cancel(self, approval_id: str) -> Optional[ApprovalRequest]:

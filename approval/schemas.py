@@ -30,6 +30,7 @@ class ApprovalRequest(BaseModel):
     requested_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     decided_at: Optional[str] = None
     decided_by: Optional[str] = None
+    decided_message: Optional[str] = Field(default=None, description="Custom approver message/reason sent with approve/reject")
 
     def is_expired(self) -> bool:
         try:

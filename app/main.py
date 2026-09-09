@@ -151,14 +151,32 @@ async function fetchLogs(){
     return `<div class="log-line ${cls}">[${l.timestamp}] <strong>${l.severity}</strong> ${l.error_code||''} ${l.message} <span style="opacity:.6">trace=${l.trace_id||'none'}</span></div>`;
   }).join('');
   box.scrollTop=box.scrollHeight;
-  // approval poll
+  // approval poll — preserve typed message across re-renders, auto-focus new inputs
   fetch('/api/approvals/pending').then(r=>r.json()).then(d=>{
     const ab=document.getElementById('approval-box');
-    if(d.length){ab.innerHTML=d.map(a=>`<div style="padding:6px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk} <button onclick="approve('${a.approval_id}')" style="margin-left:6px;padding:2px 8px;border-radius:4px;background:var(--accent-green);border:none;color:#fff;cursor:pointer">Approve</button> <button onclick="reject('${a.approval_id}')" style="padding:2px 8px;border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Reject</button></div>`).join('');} else {ab.innerHTML='No pending approvals';}
+    if(d.length){
+      const prevFocus=document.activeElement&&document.activeElement.id?document.activeElement.id:null;
+      const prevVals={}; document.querySelectorAll('.appr-msg').forEach(el=>{prevVals[el.dataset.approvalId]=el.value;});
+      const prevIds=new Set([...document.querySelectorAll('.appr-msg')].map(el=>el.dataset.approvalId));
+      ab.innerHTML=d.map(a=>`<div style="padding:6px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — e.g. verified blast radius, rollback ready" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" onkeydown="if(event.key==='Enter'){sendDecision('${a.approval_id}',true);}" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true)" style="padding:2px 8px;border-radius:4px;background:var(--accent-green);border:none;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false)" style="margin-left:6px;padding:2px 8px;border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Reject</button></div></div>`).join('');
+      // restore in-progress typing
+      document.querySelectorAll('.appr-msg').forEach(el=>{ if(prevVals[el.dataset.approvalId]!==undefined) el.value=prevVals[el.dataset.approvalId]; });
+      // focus first new approval input
+      const fresh=[...document.querySelectorAll('.appr-msg')].find(el=>!prevIds.has(el.dataset.approvalId));
+      if(fresh){ fresh.focus(); }
+      else if(prevFocus&&document.getElementById(prevFocus)){ const el=document.getElementById(prevFocus); el.focus(); el.setSelectionRange(el.value.length,el.value.length); }
+    } else {ab.innerHTML='No pending approvals';}
   });
 }
-async function approve(id){ await fetch('/api/approvals/'+id+'/approve',{method:'POST'}); fetchLogs(); }
-async function reject(id){ await fetch('/api/approvals/'+id+'/reject',{method:'POST'}); fetchLogs(); }
+async function sendDecision(id, isApprove){
+  const input=document.getElementById('msg-'+id);
+  const message=input?input.value.trim():"";
+  const endpoint=isApprove?'/api/approvals/'+id+'/approve':'/api/approvals/'+id+'/reject';
+  await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});
+  fetchLogs();
+}
+async function approve(id){ return sendDecision(id,true); }
+async function reject(id){ return sendDecision(id,false); }
 async function runRCA(){ const out=document.getElementById('rca-output'); out.style.display='none'; const res=await fetch('/api/analyze/'+currentIncident); const data=await res.json(); renderRCA(data); }
 async function runLiveRCA(){
   const btn=document.getElementById('rca-btn'); btn.disabled=true; btn.innerText='⏳ Investigating...';
@@ -171,8 +189,8 @@ async function runLiveRCA(){
   const rca=data.root_cause?data:data;
   // For live, data contains remediation_plan+approval
   renderRCA(rca.root_cause?rca:{...rca, ...rca.remediation_plan});
-  // If live returned approval, show it
-  if(data.approval){ document.getElementById('approval-box').innerHTML=`<div style="padding:6px;border:1px solid var(--accent-cyan);border-radius:6px"><strong>New Approval ${data.approval.approval_id}</strong><br/>${data.approval.action} Risk ${data.approval.risk}<br/><button onclick="approve('${data.approval.approval_id}')" style="margin-top:6px;padding:4px 10px;background:var(--accent-green);border:none;border-radius:4px;color:#fff;cursor:pointer">Approve</button></div>`; }
+  // If live returned approval, show it with message box + focus
+  if(data.approval){ document.getElementById('approval-box').innerHTML=`<div style="padding:6px;border:1px solid var(--accent-cyan);border-radius:6px"><strong>New Approval ${data.approval.approval_id}</strong><br/>${data.approval.action} Risk ${data.approval.risk}<br/><input class="appr-msg" data-approval-id="${data.approval.approval_id}" id="msg-${data.approval.approval_id}" placeholder="Add a note (optional) — Enter to approve" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" onkeydown="if(event.key==='Enter'){sendDecision('${data.approval.approval_id}',true);}" /><div style="margin-top:6px"><button onclick="sendDecision('${data.approval.approval_id}',true)" style="padding:4px 10px;background:var(--accent-green);border:none;border-radius:4px;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${data.approval.approval_id}',false)" style="margin-left:6px;padding:4px 10px;background:var(--accent-red);border:none;border-radius:4px;color:#fff;cursor:pointer">Reject</button></div></div>`; const inp=document.getElementById('msg-'+data.approval.approval_id); if(inp) inp.focus(); }
   btn.disabled=false; btn.innerText='🧠 Do RCA (Live)';
   fetchLogs();
 }
@@ -283,6 +301,7 @@ def create_remediation_plan(incident_id: str):
     return {"remediation_plan": plan.model_dump(), "approval": approval.model_dump()}
 
 @app.get("/approvals/{approval_id}")
+@app.get("/api/approvals/{approval_id}")
 def get_approval(approval_id: str):
     req = global_approval_manager.get(approval_id)
     if not req:
@@ -290,22 +309,32 @@ def get_approval(approval_id: str):
     return req.model_dump()
 
 @app.post("/approvals/{approval_id}/approve")
-def approve_request(approval_id: str, approver: str = "human-operator"):
-    req = global_approval_manager.approve(approval_id, approver=approver)
+@app.post("/api/approvals/{approval_id}/approve")
+def approve_request(approval_id: str, approver: str = "human-operator", body: dict = None):
+    # Accept custom message via JSON body {approver, message} or query param
+    msg = (body or {}).get("message", "") if isinstance(body, dict) else ""
+    if isinstance(body, dict) and body.get("approver"):
+        approver = body.get("approver")
+    req = global_approval_manager.approve(approval_id, approver=approver, message=msg)
     if not req:
         raise HTTPException(status_code=404, detail="Approval not found")
-    audit_log("APPROVAL_APPROVED", req.incident_id, approver, req.action, req.target_resource, approval_id=approval_id)
+    audit_log("APPROVAL_APPROVED", req.incident_id, approver, req.action, req.target_resource, approval_id=approval_id, result=msg)
     return req.model_dump()
 
 @app.post("/approvals/{approval_id}/reject")
-def reject_request(approval_id: str, approver: str = "human-operator"):
-    req = global_approval_manager.reject(approval_id, approver=approver)
+@app.post("/api/approvals/{approval_id}/reject")
+def reject_request(approval_id: str, approver: str = "human-operator", body: dict = None):
+    msg = (body or {}).get("message", "") if isinstance(body, dict) else ""
+    if isinstance(body, dict) and body.get("approver"):
+        approver = body.get("approver")
+    req = global_approval_manager.reject(approval_id, approver=approver, message=msg)
     if not req:
         raise HTTPException(status_code=404, detail="Approval not found")
-    audit_log("APPROVAL_REJECTED", req.incident_id, approver, req.action, req.target_resource, approval_id=approval_id)
+    audit_log("APPROVAL_REJECTED", req.incident_id, approver, req.action, req.target_resource, approval_id=approval_id, result=msg)
     return req.model_dump()
 
 @app.post("/approvals/{approval_id}/cancel")
+@app.post("/api/approvals/{approval_id}/cancel")
 def cancel_request(approval_id: str):
     req = global_approval_manager.cancel(approval_id)
     if not req:
@@ -314,6 +343,7 @@ def cancel_request(approval_id: str):
     return req.model_dump()
 
 @app.post("/approvals/{approval_id}/execute")
+@app.post("/api/approvals/{approval_id}/execute")
 def execute_approval(approval_id: str, action_params: dict = None):
     action_params = action_params or {}
     req = global_approval_manager.get(approval_id)
