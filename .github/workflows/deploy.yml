@@ -19,10 +19,8 @@ jobs:
         with: { python-version: "3.11" }
       - run: pip install -r requirements.txt
       - run: pytest -q
-      - name: Validate inline dashboard JS syntax
-        run: |
-          python -c "import re; html=open('app/main.py',encoding='utf-8').read(); m=re.search(r'<script>(.*)</script>', html, re.S); open('/tmp/dash.js','w').write(m.group(1))"
-          node --check /tmp/dash.js && echo "dashboard JS OK"
+      - name: Validate served dashboard JS (catches Python-eaten escapes)
+        run: python scripts/check_dashboard.py && echo "dashboard gate OK"
 
   deploy:
     needs: test

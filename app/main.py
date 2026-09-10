@@ -891,7 +891,7 @@ function go(view, arg){
   if(location.hash===h){ syncFromHash(); } else { location.hash=h; }
 }
 function syncFromHash(){
-  const parts=(location.hash||'#/').replace(/^#\//,'').split('/');
+  const parts=(location.hash||'#/').replace('#/','').split('/');
   const v=parts[0]||'';
   const routes={'':'home','projects':'projects','incidents':'incidents','pull-requests':'prs','analyze':'analyze','settings':'settings'};
   showView(routes[v]||'home', parts[1], parts[2]);
@@ -1256,7 +1256,7 @@ async function openProject(pid, tab){
       body.innerHTML=`<div style="font-size:.84rem">Languages: ${esc((d.languages||[]).join(', ')||'—')}<br/>Frameworks: ${esc((d.frameworks||[]).join(', ')||'—')}<br/>Services: ${esc((d.services||[]).join(', ')||'—')}<br/>Tests: ${(d.tests||[]).length} file(s) · Dockerfiles: ${(d.dockerfiles||[]).length} · CI: ${(d.ci_files||[]).length}<br/>Repository Access: <strong>${esc(p.repo_access||'READ_ONLY')}</strong> (PR creation ${p.repo_access==='PR_CREATION_ENABLED'?'enabled':'requires CODE_CHANGE approval gating'})</div>
       <div style="margin-top:8px;display:flex;gap:6px"><button class="sim-btn" onclick="rescanProject('${esc(pid)}')">Re-scan Repository</button><button class="sim-btn" onclick="testSource('${esc(pid)}','git')">Test Connection</button><button class="sim-btn" onclick="disconnectSource('${esc(pid)}','git')">Disconnect Repository</button></div><div id="proj-cfg-msg" style="font-size:.8rem;margin-top:6px"></div>`;
     }
-  }catch(e){ box.innerHTML='<div class="card">Failed to load project. <button class="sim-btn" onclick="openProject(\''+pid+'\')">Retry</button></div>'; }
+  }catch(e){ box.innerHTML='<div class="card">Failed to load project. <button class="sim-btn" data-pid="'+pid+'" onclick="openProject(this.dataset.pid)">Retry</button></div>'; }
 }
 let WIZ={step:1,mode:'new',data:{}};
 function openOnboard(mode){
