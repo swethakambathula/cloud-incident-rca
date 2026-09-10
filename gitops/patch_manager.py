@@ -24,6 +24,9 @@ def _run_git_stdin(repo_path: str, args: list, patch_text: str):
 
 def apply_patch(repo_path: str, patch_text: str, approved_sha256: str) -> str:
     """Apply only after hash match; returns resulting git diff stat."""
+    from gitops.repository import is_repo_root
+    if not is_repo_root(repo_path):
+        raise PermissionError(f"Not a git checkout: {repo_path}")
     verify_hash(patch_text, approved_sha256)
     proc = _run_git_stdin(repo_path, ["apply", "--check", "-"], patch_text)
     if proc.returncode != 0:

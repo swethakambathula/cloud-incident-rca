@@ -7,6 +7,7 @@ import glob
 import json
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from typing import List
 import uvicorn
 
 from agents.rca_agent.agent import CloudRCAAgent
@@ -64,7 +65,7 @@ def _execute_and_verify(req, action_params):
         postmortem = {"error": str(e)}
     return result, verification, postmortem
 
-app = FastAPI(title="Cloud Incident RCA Agent Dashboard - Phase 4")
+app = FastAPI(title="Cloud RCA Agent")
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -113,43 +114,219 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px} .dot-green{background:#ffffff;box-shadow:0 0 6px rgba(255,255,255,.6)} .dot-red{background:#9a9a9a;animation:pulse 1.2s infinite}
         @keyframes pulse{0%{opacity:1}50%{opacity:.4}100%{opacity:1}}
             button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #d9d9d9;outline-offset:1px}
+    
+        :root{--background:#050505;--surface:#0d0d0d;--surface-secondary:#151515;--border:#2a2a2a;--text-primary:#ffffff;--text-secondary:#a6a6a6;--accent:#d9d9d9;--success:#3d9a50;--warning:#b98a2f;--danger:#c0564d;--terminal-background:#000000}
+        #topnav{display:flex;gap:6px;align-items:center;padding:10px 16px;background:#0a0a0a;border-bottom:1px solid var(--border-color);position:sticky;top:0;z-index:50}
+        #topnav .brand{font-weight:700;margin-right:12px;white-space:nowrap}
+        .nav-btn{padding:7px 12px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:.82rem;font-weight:600;cursor:pointer}
+        .nav-btn:hover{background:#1c1c1c;color:#fff}
+        .nav-btn.active{background:#262626;color:#fff;border:1px solid #4a4a4a}
+        #app{display:flex;flex:1;min-height:0}
+        .view{display:none}
+        .view.active{display:block}
+        #crumbs{font-size:.78rem;color:var(--text-muted);margin-bottom:12px}
+        #crumbs a{color:var(--text-secondary);cursor:pointer;text-decoration:underline}
+        .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px}
+        .stat-card{background:linear-gradient(180deg,#161616,#0b0b0b);border:1px solid var(--border-color);border-radius:10px;padding:16px}
+        .stat-card .num{font-size:1.6rem;font-weight:700}
+        .stat-card .lbl{font-size:.78rem;color:var(--text-muted)}
+        .btn-primary{background:linear-gradient(180deg,#3d3d3d,#161616);border:1px solid #6f6f6f}
+        table.tbl{width:100%;border-collapse:collapse;font-size:.82rem}
+        table.tbl th,table.tbl td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border-color);vertical-align:top}
+        table.tbl th{color:var(--text-muted);font-weight:600;text-transform:uppercase;font-size:.7rem;letter-spacing:.04em}
+        table.tbl tr.clickable{cursor:pointer}
+        table.tbl tr.clickable:hover{background:#1c1c1c}
+        .pill{display:inline-block;padding:2px 9px;border-radius:12px;font-size:.72rem;font-weight:700;border:1px solid #4a4a4a;white-space:nowrap}
+        .pill.ok{border-color:var(--success);color:#c9ecd2}
+        .pill.bad{border-color:var(--danger);color:#f2c4bf}
+        .pill.warn{border-color:var(--warning);color:#efdfb5}
+        .pill.info{border-color:#4a4a4a;color:#d9d9d9}
+        .stepper{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+        .step{flex:1;min-width:110px;background:#101010;border:1px solid var(--border-color);border-radius:8px;padding:8px 10px;font-size:.74rem;cursor:pointer}
+        .step.done{border-left:3px solid var(--success)}
+        .step.run{border-left:3px solid var(--warning)}
+        .step.fail{border-left:3px solid var(--danger)}
+        .step.skip{opacity:.55}
+        .step .t{font-weight:700}
+        .step .s{color:var(--text-muted);font-size:.7rem}
+        .modal-veil{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
+        .modal-veil.open{display:flex}
+        .modal{background:#101010;border:1px solid #4a4a4a;border-radius:12px;max-width:640px;width:100%;max-height:88vh;overflow-y:auto;padding:22px}
+        .modal input,.modal select,.modal textarea{width:100%;background:#000;border:1px solid var(--border-color);border-radius:6px;color:#fff;padding:8px 10px;margin:4px 0 10px;font-size:.85rem}
+        .modal label{font-size:.78rem;color:var(--text-muted)}
+        .wiz-steps{display:flex;gap:6px;margin-bottom:14px}
+        .wiz-steps span{flex:1;text-align:center;font-size:.7rem;padding:6px;border-radius:6px;background:#141414;color:var(--text-muted)}
+        .wiz-steps span.on{background:#262626;color:#fff;border:1px solid #4a4a4a}
+        .tabs{display:flex;gap:6px;margin:12px 0;flex-wrap:wrap}
+        .tabs button{padding:7px 12px;border-radius:6px;border:1px solid var(--border-color);background:#101010;color:var(--text-muted);cursor:pointer;font-size:.8rem}
+        .tabs button.on{background:#262626;color:#fff;border-color:#4a4a4a}
+        .skeleton{background:linear-gradient(90deg,#141414,#1e1e1e,#141414);border-radius:6px;min-height:18px;margin:6px 0;animation:sk 1.4s infinite}
+        @keyframes sk{0%{opacity:.5}50%{opacity:1}100%{opacity:.5}}
+        .metric-chip{background:#000;border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;font-size:.78rem}
+        .metric-chip strong{font-size:1rem;display:block}
+        .metric-chip.over{border-color:var(--warning)}
+        details.sim-group{border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px;background:#0d0d0d}
+        details.sim-group summary{cursor:pointer;padding:10px 14px;font-weight:700;font-size:.85rem}
+        details.sim-group .grp{padding:0 14px 12px}
+        details.sim-group h5{font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px}
+        .timeline{border-left:2px solid #3a3a3a;margin:8px 0 8px 6px;padding-left:14px}
+        .timeline div{margin-bottom:10px;font-size:.8rem}
+        .timeline .ts{color:var(--text-muted);font-size:.72rem}
+        a{color:#d9d9d9}
+        [data-theme="light"]{--bg-dark:#f2f2f2;--card-bg:#ffffff;--text-main:#111111;--text-muted:#555555;--border-color:#dddddd;--accent-cyan:#333333}
+        [data-theme="light"] body{background:#f2f2f2;color:#111}
+        [data-theme="light"] .sidebar,[data-theme="light"] #topnav{background:#ffffff;border-color:#dddddd}
+        [data-theme="light"] .card,[data-theme="light"] .stat-card,[data-theme="light"] .modal,[data-theme="light"] details.sim-group{background:#ffffff;border-color:#dddddd}
+        [data-theme="light"] .item-box,[data-theme="light"] .evidence-box,[data-theme="light"] .log-panel,[data-theme="light"] pre,[data-theme="light"] #log-summary,[data-theme="light"] .step{background:#f7f7f7;border-color:#dddddd;color:#111}
+        [data-theme="light"] .sim-btn,[data-theme="light"] select,[data-theme="light"] input,[data-theme="light"] .tabs button{background:#fff;border-color:#ccc;color:#111}
+        [data-theme="light"] .log-error{color:#111}
+        [data-theme="light"] table.tbl th,[data-theme="light"] table.tbl td{border-color:#e2e2e2}
+        [data-theme="light"] a{color:#222}
+        @media (max-width: 900px){#app{flex-direction:column}#topnav{flex-wrap:wrap}.cards{grid-template-columns:repeat(2,1fr)}}
+
     </style>
 </head>
 <body>
+<nav id="topnav" aria-label="Primary">
+  <span class="brand">◼ Cloud RCA Agent</span>
+  <button class="nav-btn" data-view="home" onclick="go('home')" title="Home">⌂ Home</button>
+  <button class="nav-btn" data-view="projects" onclick="go('projects')">Projects</button>
+  <button class="nav-btn" data-view="incidents" onclick="go('incidents')">Incidents</button>
+  <button class="nav-btn" data-view="prs" onclick="go('prs')">Pull Requests</button>
+  <button class="nav-btn" data-view="analyze" onclick="go('analyze')">Analyze</button>
+  <button class="nav-btn" data-view="settings" onclick="go('settings')">Settings</button>
+  <span style="flex:1"></span>
+  <button class="nav-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle dark / light theme">◐ Theme</button>
+</nav>
+<div id="app">
     <div class="sidebar">
-        <h2>🔍 Cloud RCA Agent</h2>
-        <p style="font-size:.82rem;color:var(--text-muted)">Select static incident or simulate live errors:</p>
-        <div id="incident-list">Loading incidents...</div>
+        <div style="display:flex;align-items:center;gap:8px">
+            <h2 style="flex:1">◼ Cloud RCA Agent</h2>
+            <button class="sim-btn" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar">☰</button>
+        </div>
+        <div><p class="side-h">Projects</p><div id="side-projects">Loading…</div></div>
+        <div><p class="side-h">Operations</p>
+            <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="sim-btn side-link" onclick="go('incidents')">Active Incidents</button>
+            <button class="sim-btn side-link" onclick="go('prs')">Pull Requests</button>
+            <button class="sim-btn side-link" onclick="go('analyze')">Analyze Logs</button>
+            </div>
+        </div>
+        <div><p class="side-h">Administration</p>
+            <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="sim-btn side-link" onclick="openOnboard()">+ Onboard Project</button>
+            <button class="sim-btn side-link" onclick="go('settings')">Settings</button>
+            </div>
+        </div>
         <div style="margin-top:8px;padding-top:12px;border-top:1px solid var(--border-color)">
-            <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:6px">Phase 4 Approval</p>
+            <p class="side-h">Approval Center</p>
             <div id="approval-box" style="font-size:.78rem;color:var(--text-muted)">No pending approvals</div>
         </div>
     </div>
     <div class="main-content">
+<div id="crumbs" aria-label="Breadcrumb"></div>
+<div id="view-incidents">
+<div id="incidents-table-wrap">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <h1 style="flex:1">Incidents</h1>
+    <button class="btn btn-primary" onclick="toggleCreateForm()">+ Create Incident</button>
+  </div>
+  <div id="create-form" style="display:none" class="card">
+    <div class="tabs">
+      <button id="tab-manual" class="on" onclick="createTab('manual')">Manual Incident</button>
+      <button id="tab-sim" onclick="createTab('sim')">Simulated Incident</button>
+    </div>
+    <div id="create-manual">
+      <div class="grid">
+      <div><label>Incident title</label><input id="ci-title" placeholder="Checkout HTTP 500 spike" /></div>
+      <div><label>Project</label><select id="ci-project"></select></div>
+      </div>
+      <div class="grid">
+      <div><label>Environment</label><select id="ci-env"><option>prod</option><option>staging</option><option>dev</option></select></div>
+      <div><label>Severity</label><select id="ci-sev"><option value="P1">Critical (P1)</option><option value="P2" selected>High (P2)</option><option value="P3">Medium (P3)</option></select></div>
+      </div>
+      <div><label>Affected services (comma separated)</label><input id="ci-services" placeholder="checkout-service" /></div>
+      <div><label>Description</label><textarea id="ci-desc" rows="3" placeholder="What is happening?"></textarea></div>
+      <div class="grid">
+      <div><label>Start time (ISO, optional)</label><input id="ci-start" placeholder="2026-09-10T10:00:00Z" /></div>
+      <div><label>Revision / deployment (optional)</label><input id="ci-rev" placeholder="checkout-service-00005-bad" /></div>
+      </div>
+      <div class="grid">
+      <div><label>Trace ID (optional)</label><input id="ci-trace" /></div>
+      <div><label>Request ID (optional)</label><input id="ci-req" /></div>
+      </div>
+      <div><label>Error signature (optional)</label><input id="ci-err" placeholder="NULL_POINTER_EXCEPTION" /></div>
+      <div><label>Additional context</label><textarea id="ci-context" rows="2"></textarea></div>
+      <div style="margin-top:8px"><button class="btn btn-primary" onclick="createManual()">Create Incident</button> <span id="ci-create-result" style="font-size:.8rem"></span></div>
+    </div>
+    <div id="create-sim" style="display:none">
+      <p style="font-size:.82rem;color:var(--text-muted)">Each simulation injects a documented failure into the live log stream. Nothing is analyzed until you run RCA.</p>
+      <div id="create-sim-list"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
+      <input id="inc-search" oninput="renderIncidentTable()" placeholder="Search id, error, service, trace…" style="flex:1;min-width:180px;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px" />
+      <select id="inc-filter-sev" onchange="renderIncidentTable()"><option value="">All severities</option><option>P1</option><option>P2</option><option>P3</option></select>
+      <select id="inc-filter-status" onchange="renderIncidentTable()"><option value="">All statuses</option><option>Open</option><option>Investigating</option><option>Resolved</option></select>
+      <span id="inc-count" style="font-size:.78rem;color:var(--text-muted)"></span>
+    </div>
+    <div style="overflow-x:auto"><table class="tbl" aria-label="Incidents">
+      <thead><tr><th>Incident</th><th>Project</th><th>Severity</th><th>Status</th><th>Service</th><th>RCA</th><th>PR</th></tr></thead>
+      <tbody id="inc-table-body"><tr><td colspan="7">Loading…</td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+<div id="incident-workspace" style="display:none">
+  <button class="sim-btn" onclick="showIncidentTable()">← All incidents</button>
+  <span id="ws-project-chip" style="margin-left:8px;font-size:.78rem;color:var(--text-muted)"></span>
         <div class="header">
-            <div><h1 id="inc-title">Google Cloud RCA Investigation</h1><p id="inc-desc" style="color:var(--text-muted);margin-top:4px">Select an incident or simulate errors below.</p></div>
-            <button class="btn btn-green" id="rca-btn" onclick="runLiveRCA()">🧠 Do RCA (Live)</button>
+            <div><h1 id="inc-title">Google Cloud RCA Investigation</h1><p id="inc-desc" style="color:var(--text-muted);margin-top:4px">Select an incident or simulate errors below.</p><div id="inc-meta" style="font-size:.78rem;color:var(--text-muted);margin-top:6px"></div></div>
+            <button class="btn btn-green" id="rca-btn-top" onclick="runLiveRCA()" style="display:none">🧠 Do RCA (Live)</button>
         </div>
-        <div class="sim-bar">
-            <strong>🧪 Simulate Errors:</strong>
-            <button class="sim-btn" onclick="simulate('db-timeout')">DB Timeout</button>
-            <button class="sim-btn" onclick="simulate('pool-exhaustion')">Pool Exhaustion</button>
-            <button class="sim-btn" onclick="simulate('bad-deployment')">Bad Deployment</button>
-            <button class="sim-btn" onclick="simulate('dependency-failure')">Dependency Failure</button>
-            <button class="sim-btn" onclick="simulate('traffic-overload')">Traffic Overload</button>
-            <button class="sim-btn" onclick="simulate('config-error')">Config Error</button>
-            <button class="sim-btn" onclick="simulate('memory-leak')">Memory Leak</button>
-            <button class="sim-btn" onclick="simulate('cpu-exhaustion')">CPU Exhaustion</button>
-            <button class="sim-btn" onclick="simulate('auth-failure')">Auth Failure</button>
-            <button class="sim-btn" onclick="simulate('network-timeout')">Network Timeout</button>
-            <button class="sim-btn" onclick="simulate('malformed-payload')">Malformed Input</button>
-            <button class="sim-btn" onclick="simulate('rate-limit')">Rate Limit</button>
-            <button class="sim-btn btn-red" onclick="clearLogs()">Clear</button>
+        <div id="wf-stepper" class="stepper" aria-label="RCA workflow progress"></div>
+        <div class="card" style="margin-bottom:16px">
+            <div class="card-title">1 · Create / Simulate Incident</div>
+            <details class="sim-group" open>
+                <summary>Code / Application Errors</summary>
+                <div class="grp">
+                    <h5>Configuration</h5>
+                    <button class="sim-btn" data-sim="bad-deployment" onclick="simulate('bad-deployment')">Bad Deployment</button>
+                    <button class="sim-btn" data-sim="config-error" onclick="simulate('config-error')">Config Error</button>
+                    <h5>Application Logic</h5>
+                    <button class="sim-btn" data-sim="malformed-payload" onclick="simulate('malformed-payload')">Malformed Input</button>
+                    <button class="sim-btn" data-sim="auth-failure" onclick="simulate('auth-failure')">Auth Failure</button>
+                    <h5>Application Dependency</h5>
+                    <button class="sim-btn" data-sim="dependency-failure" onclick="simulate('dependency-failure')">Dependency Failure</button>
+                    <button class="sim-btn" data-sim="db-timeout" onclick="simulate('db-timeout')">DB Timeout</button>
+                    <h5>Application Resource</h5>
+                    <button class="sim-btn" data-sim="pool-exhaustion" onclick="simulate('pool-exhaustion')">Pool Exhaustion</button>
+                </div>
+            </details>
+            <details class="sim-group">
+                <summary>Infrastructure / Platform Errors</summary>
+                <div class="grp">
+                    <h5>Compute</h5>
+                    <button class="sim-btn" data-sim="cpu-exhaustion" onclick="simulate('cpu-exhaustion')">CPU Exhaustion</button>
+                    <button class="sim-btn" data-sim="memory-leak" onclick="simulate('memory-leak')">Memory Leak</button>
+                    <h5>Network</h5>
+                    <button class="sim-btn" data-sim="network-timeout" onclick="simulate('network-timeout')">Network Timeout</button>
+                    <h5>Capacity</h5>
+                    <button class="sim-btn" data-sim="traffic-overload" onclick="simulate('traffic-overload')">Traffic Overload</button>
+                    <h5>Platform / Quota</h5>
+                    <button class="sim-btn" data-sim="rate-limit" onclick="simulate('rate-limit')">Rate Limit</button>
+                </div>
+            </details>
+            <div><button class="sim-btn btn-red" onclick="clearLogs()">Clear Simulation</button>
+            <span id="sim-cat" style="margin-left:10px;font-size:.78rem;color:var(--text-muted)"></span></div>
+            <div id="sim-desc" style="font-size:.78rem;color:var(--text-muted);margin-top:6px">Pick an error to inject a documented failure into the live log stream. RCA runs only when you start it.</div>
+        </div>
             <span id="live-status" style="margin-left:auto;font-size:.78rem;color:var(--text-muted)"><span class="status-dot dot-green"></span>Live</span>
         </div>
         <div class="grid">
             <div class="card" style="grid-column: span 2;">
-                <div class="card-title">📡 Live Logs <span style="font-size:.75rem;color:var(--text-muted);font-weight:400">— auto-refresh every 3s, click Simulate to inject</span>
+                <div class="card-title">📡 Live Logs <span style="font-size:.75rem;color:var(--text-muted);font-weight:400">2 · Live Telemetry — auto-refresh, click Simulate to inject</span>
+                    <button class="sim-btn" id="copy-logs-btn" onclick="copyLogs()" title="Copy visible logs" style="margin-left:auto">Copy</button>
                     <button class="sim-btn" id="pause-btn" onclick="togglePause()" style="margin-left:auto">Pause</button>
                 </div>
                 <div id="log-summary" style="display:flex;flex-wrap:wrap;gap:14px;font-size:.78rem;color:var(--text-muted);margin-bottom:8px;padding:8px 10px;background:#000000;border:1px solid var(--border-color);border-radius:6px">No data yet — simulate an incident.</div>
@@ -160,14 +337,26 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <input id="f-trace" oninput="renderLogs()" placeholder="trace id…" style="background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem;width:150px" />
                     <input id="f-search" oninput="renderLogs()" placeholder="search logs…" style="flex:1;min-width:140px;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem" />
                 </div>
-                <div id="live-logs" class="log-panel">Waiting for simulated errors... Click any 🧪 button above.</div>
+                <div id="live-logs" class="log-panel" aria-label="Live logs terminal">Waiting for simulated errors... Click any button above.</div>
+                <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                    <button class="btn btn-green btn-primary" id="rca-btn" onclick="runLiveRCA()">Run Live RCA</button>
+                    <span id="rca-gate" style="font-size:.78rem;color:var(--text-muted)">Run the RCA agent against the currently collected incident evidence. The agent will correlate logs, metrics, deployments, traces, infrastructure state, and code changes before proposing a root cause.</span>
+                </div>
             </div>
         </div>
         <div id="rca-output" style="display:none;">
             <div class="grid">
-                <div class="card"><div class="card-title">🎯 Confirmed Root Cause</div>
+                <div class="card"><div class="card-title">🎯 Confirmed Root Cause
+                        <span style="margin-left:auto;display:flex;gap:6px">
+                            <button class="sim-btn" onclick="copyRcaSummary()" title="Copy concise RCA summary">Copy Summary</button>
+                            <button class="sim-btn" onclick="exportRca('json')" title="Export RCA as JSON">JSON</button>
+                            <button class="sim-btn" onclick="exportRca('markdown')" title="Export RCA as Markdown">MD</button>
+                        </span></div>
+                    <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:8px">3 · RCA Results <span id="evidence-fresh"></span></div>
                     <div style="margin-bottom:12px;"><span class="badge badge-red" id="rc-category">Category</span> <span class="badge badge-yellow" id="rc-confidence">Confidence</span> <span class="badge badge-green" id="rc-risk">Risk</span></div>
                     <p id="rc-summary" style="line-height:1.6;font-size:.95rem"></p>
+                    <div id="rc-domain" style="font-size:.85rem;margin-top:8px"></div>
+                    <div id="rc-why" style="font-size:.85rem;margin-top:8px"></div>
                     <div style="margin-top:14px;font-size:.85rem;color:var(--text-muted)"><strong>Blast Radius:</strong> <span id="rc-blast"></span></div>
                     <div style="margin-top:10px;font-size:.8rem;color:var(--text-muted)"><strong>Timeline:</strong><div id="rc-timeline" style="margin-top:6px"></div></div>
                 </div>
@@ -205,7 +394,120 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
         </div>
-    </div>
+            <div class="grid">
+                <div class="card"><div class="card-title">Approval Timeline</div><div id="approval-timeline"><span style="color:var(--text-muted);font-size:.8rem">No approval events yet.</span></div></div>
+                <div class="card"><div class="card-title">Related Pull Request</div><div id="related-pr"><span style="font-size:.8rem;color:var(--text-muted)">No pull request raised for this incident.</span></div></div>
+            </div>
+            <div class="grid">
+                <div class="card"><div class="card-title">RCA Runs</div><div id="rca-runs"><span style="font-size:.8rem;color:var(--text-muted)">No runs yet.</span></div></div>
+                <div class="card"><div class="card-title">Incident Notes</div><div id="notes-list"></div>
+                    <div style="display:flex;gap:6px;margin-top:8px"><input id="note-input" placeholder="Add a note…" aria-label="Add incident note" style="flex:1;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px" /><button class="sim-btn" onclick="addNote()">Add</button></div>
+                </div>
+            </div>
+        </div>
+                </div>
+<div id="view-home" class="view">
+            <h1>Cloud RCA Agent</h1>
+            <p style="color:var(--text-muted)">AI-powered incident investigation, code remediation, and PR automation.</p>
+            <div style="display:flex;gap:8px;margin:12px 0 20px;flex-wrap:wrap">
+                <button class="btn btn-primary" onclick="go('projects')">Open Projects</button>
+                <button class="sim-btn" onclick="go('incidents')">View Active Incidents</button>
+            </div>
+            <div class="cards">
+                <div class="stat-card"><div class="num" id="hm-projects">–</div><div class="lbl">Active Projects</div></div>
+                <div class="stat-card"><div class="num" id="hm-incidents">–</div><div class="lbl">Open Incidents</div></div>
+                <div class="stat-card"><div class="num" id="hm-rca">–</div><div class="lbl">RCA Investigations</div></div>
+                <div class="stat-card"><div class="num" id="hm-prs">–</div><div class="lbl">Pull Requests Raised by Agent</div></div>
+                <div class="stat-card"><div class="num" id="hm-approvals">–</div><div class="lbl">Pending Human Approvals</div></div>
+            </div>
+            <div class="grid">
+                <div class="card"><div class="card-title">Recent Activity</div><div id="hm-activity"></div></div>
+                <div class="card"><div class="card-title">Agent Pull Requests</div><div id="hm-recent-prs"></div></div>
+            </div>
+            <div class="card"><div class="card-title">How an investigation flows</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:.76rem">
+                    <span class="pill info">Incident</span>→<span class="pill info">Evidence Collection</span>→<span class="pill info">RCA</span>→<span class="pill info">Root Cause</span>→<span class="pill info">Remediation</span>→<span class="pill info">Approval</span>→<span class="pill info">PR</span>
+                </div>
+            </div>
+            <div class="card"><div class="card-title">Quick Actions</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button class="sim-btn" onclick="openOnboard()">Onboard Project</button>
+                    <button class="sim-btn" onclick="openOnboard('repo')">Connect Git Repository</button>
+                    <button class="sim-btn" onclick="go('analyze')">Upload Logs for RCA</button>
+                    <button class="sim-btn" onclick="go('incidents')">View Incidents</button>
+                    <button class="sim-btn" onclick="go('prs')">View Pull Requests</button>
+                </div>
+            </div>
+        </div>
+        <div id="view-projects" class="view">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+                <h1 style="flex:1">Projects</h1>
+                <button class="sim-btn" onclick="openOnboard()">+ Onboard Project</button>
+                <button class="sim-btn" onclick="openOnboard('repo')">Connect Git Repository</button>
+                <button class="sim-btn" onclick="openOnboard('cloud')">Add Google Cloud Project</button>
+                <button class="sim-btn" onclick="go('analyze')">Upload Logs for RCA</button>
+            </div>
+            <div id="projects-list" class="cards"><div class="skeleton"></div></div>
+            <div id="project-detail"></div>
+        </div>
+        <div id="view-prs" class="view">
+            <h1>Pull Requests</h1>
+            <p style="color:var(--text-muted);font-size:.85rem">Every PR raised by the RCA Agent.</p>
+            <div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;align-items:center">
+                <select id="pr-filter-project" onchange="renderPRs()" aria-label="Filter by project"><option value="">All projects</option></select>
+                <select id="pr-filter-status" onchange="renderPRs()" aria-label="Filter by status"><option value="">All statuses</option><option>Open</option><option>Merged</option><option>Closed</option><option>Failed</option><option>Awaiting Approval</option></select>
+                <span id="pr-count" style="font-size:.78rem;color:var(--text-muted)"></span>
+            </div>
+            <div class="card"><div style="overflow-x:auto"><table class="tbl" aria-label="Agent pull requests">
+                <thead><tr><th>PR</th><th>Incident</th><th>Project</th><th>Title</th><th>Created</th><th>Risk</th><th>Tests</th><th>Status</th></tr></thead>
+                <tbody id="prs-list"><tr><td colspan="8">Loading…</td></tr></tbody>
+            </table></div></div>
+            <div id="pr-detail"></div>
+        </div>
+        <div id="view-analyze" class="view">
+            <h1>Analyze Logs</h1>
+            <p style="color:var(--text-muted);font-size:.85rem">Upload application, infrastructure, or cloud logs and let the RCA Agent identify likely root causes.</p>
+            <div class="card"><div class="card-title">1 · Select Project &amp; Upload</div>
+                <div class="grid">
+                    <div><label>Project</label><select id="up-project"></select></div>
+                    <div><label>Log Source Type</label><select id="up-source"><option>Auto Detect</option><option>Application Logs</option><option>Cloud Run Logs</option><option>Kubernetes Logs</option><option>Database Logs</option><option>Load Balancer Logs</option><option>API Gateway Logs</option><option>System Logs</option><option>Mixed Logs</option></select></div>
+                </div>
+                <div id="dropzone" style="border:2px dashed #4a4a4a;border-radius:10px;padding:26px;text-align:center;margin:10px 0">
+                    <p><strong>Drop log files here</strong></p><p style="font-size:.78rem;color:var(--text-muted)">.log, .txt, .json, .jsonl, .csv — up to 4 files, 25 MB each</p>
+                    <p>or</p>
+                    <button class="sim-btn" onclick="document.getElementById('up-files').click()">Browse Files</button>
+                    <input type="file" id="up-files" multiple accept=".log,.txt,.json,.jsonl,.csv" style="display:none" />
+                </div>
+                <div id="up-filelist" style="font-size:.8rem"></div>
+                <div class="grid">
+                    <div><label>Affected Service (optional)</label><input id="up-service" placeholder="checkout-service" /></div>
+                    <div><label>Approximate Incident Start (optional)</label><input id="up-start" placeholder="2026-09-10T10:00:00Z" /></div>
+                </div>
+                <div class="grid">
+                    <div><label>Region (optional)</label><input id="up-region" placeholder="us-central1" /></div>
+                    <div><label>Environment (optional)</label><input id="up-env" placeholder="prod" /></div>
+                </div>
+                <div><label>Incident Description (optional)</label><textarea id="up-desc" rows="2"></textarea></div>
+                <div style="margin-top:10px"><button class="btn btn-primary" id="up-btn" onclick="uploadLogs()">Upload &amp; Preview</button></div>
+            </div>
+            <div class="card" id="up-preview-card" style="display:none"><div class="card-title">2 · Ingestion Preview</div><div id="up-preview"></div>
+                <div style="margin-top:10px"><button class="btn btn-primary" id="up-analyze-btn" onclick="analyzeUpload()">Run RCA</button></div>
+            </div>
+            <div id="up-results"></div>
+            <div class="card"><div class="card-title">Log Analyses</div><div id="analyses-list"></div></div>
+            <div id="analysis-detail"></div>
+        </div>
+        <div id="view-settings" class="view">
+            <h1>Settings</h1>
+            <div class="card"><div class="card-title">Appearance</div>
+                <label style="font-size:.85rem"><input type="radio" name="theme" value="dark" onchange="setTheme('dark')" /> Dark</label><br/>
+                <label style="font-size:.85rem"><input type="radio" name="theme" value="light" onchange="setTheme('light')" /> Light</label><br/>
+                <label style="font-size:.85rem"><input type="radio" name="theme" value="system" onchange="setTheme('system')" /> System preference</label>
+            </div>
+            <div class="card"><div class="card-title">Platform</div><div id="settings-body">Loading…</div></div>
+        </div>
+        <div id="modal" class="modal-veil"><div class="modal" role="dialog" aria-modal="true" aria-label="Onboard project"><div id="wizard"></div></div></div>    </div>
+</div>
 <script>
 let currentIncident='incident_001_db_timeout.json';
 let liveIncidentFile=null;
@@ -227,7 +529,7 @@ async function loadIncidents(){
   });
   // No auto-run: user picks an incident (click) or simulates + clicks Do RCA.
   document.getElementById('inc-title').innerText='Google Cloud RCA Investigation';
-  document.getElementById('inc-desc').innerText='Select an incident from the sidebar, or simulate errors below and click Do RCA (Live).';
+  document.getElementById('inc-desc').innerText='Select an incident from the sidebar, or simulate errors below and click Run Live RCA.';
 }
 async function simulate(scenario){
   const btn=document.getElementById('live-status'); btn.innerHTML='<span class="status-dot dot-red"></span>Injecting...';
@@ -248,7 +550,8 @@ let _pollInFlight=false, _lastLogSig='', _lastApprSig='';
 function _approvalCard(a, accent){
   const border=accent?'var(--accent-cyan)':'var(--border-color)';
   const pad=accent?'4px 10px':'2px 8px';
-  return `<div style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#101010;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:${pad};border-radius:4px;background:linear-gradient(180deg,#3d3d3d,#161616);border:1px solid #6f6f6f;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:${pad};border-radius:4px;background:linear-gradient(180deg,#232323,#0d0d0d);border:1px solid #4a4a4a;color:#fff;cursor:pointer">Reject</button></div></div>`;
+  const ptype=a.action_type==='CODE_CHANGE'?'Code Change':'Infrastructure Change';
+  return `<div style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><span class="pill warn">• PENDING</span> <span class="pill info">${ptype}</span> <strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#101010;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:${pad};border-radius:4px;background:linear-gradient(180deg,#3d3d3d,#161616);border:1px solid #6f6f6f;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:${pad};border-radius:4px;background:linear-gradient(180deg,#232323,#0d0d0d);border:1px solid #4a4a4a;color:#fff;cursor:pointer">Reject</button></div></div>`;
 }
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function _historyCard(a){
@@ -419,7 +722,7 @@ async function approve(id){ return sendDecision(id,true); }
 async function reject(id){ return sendDecision(id,false); }
 async function runRCA(){ const out=document.getElementById('rca-output'); out.style.display='none'; const res=await fetch('/api/analyze/'+currentIncident); const data=await res.json(); renderRCA(data); }
 async function runLiveRCA(){
-  const btn=document.getElementById('rca-btn'); btn.disabled=true; btn.innerText='⏳ Investigating...';
+  const btn=document.getElementById('rca-btn'); btn.disabled=true; btn.innerText='Working…';
   const target=liveIncidentFile||currentIncident;
   // Use multi-agent live endpoint whenever a simulation ran, else static file
   const useLive=!!(liveScenario||liveIncidentFile);
@@ -432,7 +735,7 @@ async function runLiveRCA(){
   renderRCA(rca.root_cause?rca:{...rca, ...rca.remediation_plan});
   // If live returned approval, show it with message box + focus (sync poll signature so next poll won't rebuild it)
   if(data.approval){ const ap=data.approval; _lastApprSig=ap.approval_id+':'+ap.status; document.getElementById('approval-box').innerHTML=_approvalCard(ap,true); const inp=document.getElementById('msg-'+ap.approval_id); if(inp) inp.focus(); }
-  btn.disabled=false; btn.innerText='🧠 Do RCA (Live)';
+  btn.disabled=false; btn.innerText='Run Live RCA';
   fetchLogs();
   if(useLive&&data.incident_id){
     // Code fix stays fully explicit: show the panel with a hint, create nothing.
@@ -460,7 +763,7 @@ async function proposeRemediation(){
   const d=await r.json();
   if(!r.ok){ rb.innerHTML='<span style="color:var(--accent-red)">'+esc(d.detail||'proposal failed')+'</span>'; return; }
   const p=d.remediation_plan, a=d.approval;
-  rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#000000"><strong>Proposed:</strong> ${esc(p.recommended_action)} (${esc(p.mitigation_type)}) Risk ${esc(p.estimated_risk)}<br/><strong>Effect:</strong> ${esc(p.expected_effect)}<br/><strong>Rollback:</strong> ${esc(p.rollback_plan)}<br/><strong>Approval:</strong> ${esc(a.approval_id)} <em>${esc(a.status)}</em> — decide in Phase 4 Approval (sidebar).</div>`;
+  rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#000000"><strong>Proposed:</strong> ${esc(p.recommended_action)} (${esc(p.mitigation_type)}) Risk ${esc(p.estimated_risk)}<br/><strong>Effect:</strong> ${esc(p.expected_effect)}<br/><strong>Rollback:</strong> ${esc(p.rollback_plan)}<br/><strong>Approval:</strong> ${esc(a.approval_id)} <em>${esc(a.status)}</em> — decide in Approval Center (sidebar).</div>`;
   fetchLogs();
 }
 function renderRCA(data){
@@ -472,7 +775,8 @@ function renderRCA(data){
   document.getElementById('rc-confidence').innerText=`${((data.confidence_score||data.confidence||0)*100).toFixed(1)}% CONFIDENCE`;
   document.getElementById('rc-risk').innerText=`RISK: ${data.remediation_risk||data.estimated_risk||'LOW'}`;
   document.getElementById('rc-summary').innerText=data.root_cause||data.recommended_action||'';
-  document.getElementById('rc-blast').innerText=data.blast_radius||JSON.stringify(data.blast_radius||'');
+  renderBlast(data);
+  renderRcExtras(data);
   document.getElementById('rc-action').innerText=data.recommended_action||data.expected_effect||'';
   const tBox=document.getElementById('rc-timeline'); tBox.innerHTML=(data.timeline||[]).map(t=>`<div style="font-size:.78rem;padding:4px 0;border-bottom:1px solid var(--border-color)"><strong>${t.timestamp}</strong> [${t.event_type}] ${t.description}</div>`).join('')||'<span style="color:var(--text-muted)">No timeline</span>';
   document.getElementById('additional-checks').innerHTML=(data.additional_checks_required||data.preconditions||[]).map(c=>`<div class="item-box">🔍 ${c}</div>`).join('')||'<p style="color:var(--text-muted)">None</p>';
@@ -574,7 +878,583 @@ async function refreshFixStatus(){
   const t=document.getElementById('cf-tests');
   if(job.test_output){ t.innerHTML='<strong>Test Results:</strong><pre style="background:#000000;border:1px solid var(--border-color);border-radius:6px;padding:10px;max-height:220px;overflow:auto;font-size:.75rem;white-space:pre-wrap">'+esc(job.test_output.slice(-2000))+'</pre>'; }
 }
-setInterval(fetchLogs,3000); window.onload=()=>{loadIncidents();fetchLogs();};
+
+/* ===== platform: router, incidents, workspace extras ===== */
+let TAX=null, INCIDENTS=[], CUR_PROJECT='', CUR_INCIDENT_FILE='';
+function esc2(s){ return esc(s); }
+function go(view, arg){
+  const map={home:'#/',projects:'#/projects',incidents:'#/incidents',prs:'#/pull-requests',analyze:'#/analyze',settings:'#/settings'};
+  let h=map[view]||'#/';
+  if(view==='projects'&&arg) h='#/projects/'+arg;
+  if(view==='incidents'&&arg) h='#/incidents/'+arg;
+  if(view==='prs'&&arg) h='#/pull-requests/'+arg;
+  if(location.hash===h){ syncFromHash(); } else { location.hash=h; }
+}
+function syncFromHash(){
+  const parts=(location.hash||'#/').replace(/^#\//,'').split('/');
+  const v=parts[0]||'';
+  const routes={'':'home','projects':'projects','incidents':'incidents','pull-requests':'prs','analyze':'analyze','settings':'settings'};
+  showView(routes[v]||'home', parts[1], parts[2]);
+}
+function showView(view, arg1, arg2){
+  document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
+  const map={home:'view-home',projects:'view-projects',incidents:'view-incidents',prs:'view-prs',analyze:'view-analyze',settings:'view-settings'};
+  const el=document.getElementById(map[view]||'view-home');
+  if(el) el.classList.add('active');
+  document.querySelectorAll('#topnav .nav-btn[data-view]').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
+  const names={home:'Home',projects:'Projects',incidents:'Incidents',prs:'Pull Requests',analyze:'Analyze Logs',settings:'Settings'};
+  setCrumbs([['Home',()=>go('home')],[(names[view]||'Home'),null]]);
+  if(view==='home') loadHome();
+  if(view==='projects'){ loadProjects(); if(arg1) openProject(arg1, arg2); }
+  if(view==='incidents'){ if(arg1){ openIncident(arg1); } else { showIncidentTable(); loadIncidentMeta(); } }
+  if(view==='prs'){ loadPRs(); if(arg1) openPR(arg1); }
+  if(view==='analyze'){ loadAnalyzeInit(); }
+  if(view==='settings'){ loadSettings(); }
+}
+function setCrumbs(items){
+  const c=document.getElementById('crumbs'); if(!c) return;
+  c.innerHTML=items.map((it,i)=>{
+    const last=i===items.length-1;
+    const label=typeof it==='string'?it:(it[0]||'');
+    if(last||typeof it==='string') return `<span>${esc(label)}</span>`;
+    return `<a onclick="(${it[1].toString()})()">${esc(label)}</a>`;
+  }).join(' / ');
+}
+function initRouter(){ syncFromHash(); }
+function toggleSidebar(){ document.getElementById('app').classList.toggle('collapsed'); }
+async function loadTaxonomy(){
+  try{ TAX=await (await fetch('/api/taxonomy')).json(); }catch(e){ TAX=null; }
+}
+function fmtTime(s){ if(!s) return '—'; try{ return new Date(s).toLocaleString(); }catch(e){ return s; } }
+function timeAgo(ts){
+  if(!ts) return '—';
+  const s=Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/1000));
+  if(s<60) return s+'s ago';
+  if(s<3600) return Math.floor(s/60)+'m ago';
+  return Math.floor(s/3600)+'h ago';
+}
+function tickFreshness(){
+  const el=document.getElementById('evidence-fresh');
+  if(el&&window._lastRcaAt){ el.innerText='· Evidence updated '+timeAgo(window._lastRcaAt); }
+}
+function statusPill(st){
+  const s=String(st||'');
+  if(/^(RESOLVED|MERGED|Open|PR_CREATED|HEALTHY|healthy|connected|passed)$/i.test(s)) return `<span class="pill ok">✓ ${esc(s)}</span>`;
+  if(/^(FAILED|REJECTED|Closed|ERROR|CRITICAL)$/i.test(s)) return `<span class="pill bad">✕ ${esc(s)}</span>`;
+  if(/^(WARNING|PARTIAL|PENDING|WAITING|P1)$/.test(s)) return `<span class="pill warn">! ${esc(s)}</span>`;
+  return `<span class="pill info">• ${esc(s)}</span>`;
+}
+/* ---- incidents table ---- */
+async function loadIncidentMeta(){
+  try{
+    const r=await fetch('/api/incidents/meta'); INCIDENTS=await r.json();
+  }catch(e){ INCIDENTS=[]; }
+  renderIncidentTable();
+}
+function renderIncidentTable(){
+  const body=document.getElementById('inc-table-body'); if(!body) return;
+  const q=(document.getElementById('inc-search').value||'').toLowerCase();
+  const fs=document.getElementById('inc-filter-sev').value;
+  const fst=document.getElementById('inc-filter-status').value;
+  const rows=INCIDENTS.filter(c=>{
+    if(fs&&c.severity!==fs) return false;
+    if(fst){
+      const map={Open:['Open','NEW'],Investigating:['Investigating','COLLECTING_EVIDENCE','ANALYZING','ROOT_CAUSE_IDENTIFIED','REMEDIATION_PROPOSED','WAITING_APPROVAL','APPROVED','PR_CREATING'],Resolved:['RESOLVED']};
+      if(!(map[fst]||[]).includes(c.status)) return false;
+    }
+    if(q&&!((c.incident_id||'')+' '+(c.title||'')+' '+(c.service||'')+' '+(c.root_cause||'')).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  document.getElementById('inc-count').innerText=rows.length+' incident(s)';
+  body.innerHTML=rows.length?rows.map(c=>`<tr class="clickable" onclick="openIncident('${esc(c.incident_id)}')">`+
+    `<td><strong>${esc(c.incident_id)}</strong><br/><span style="color:var(--text-muted)">${esc((c.title||'').slice(0,60))}</span><br/><span style="font-size:.7rem;color:var(--text-muted)">${esc(c.start_time||'')}</span></td>`+
+    `<td>${esc(c.project_id||'')}</td><td>${esc(c.severity||'')}</td><td>${statusPill(c.status)}</td>`+
+    `<td>${esc(c.service||'')}</td><td>${c.rca_runs&&c.rca_runs.length?('✓ '+c.rca_runs.length+' run(s) '+Math.round((c.rca_runs[c.rca_runs.length-1].confidence||0)*100)+'%'):'<span style="color:var(--text-muted)">—</span>'}</td>`+
+    `<td>${c.pr_id?('PR <strong>'+esc(c.pr_id)+'</strong>'):'<span style="color:var(--text-muted)">—</span>'}</td></tr>`).join('')
+    :'<tr><td colspan="7">No incidents found for this project.</td></tr>';
+}
+function showIncidentTable(){
+  document.getElementById('incidents-table-wrap').style.display='block';
+  document.getElementById('incident-workspace').style.display='none';
+  setCrumbs([['Home',()=>go('home')],['Incidents',null]]);
+  loadIncidentMeta();
+}
+async function openIncident(incident_id){
+  const meta=(INCIDENTS||[]).find(c=>c.incident_id===incident_id);
+  document.getElementById('incidents-table-wrap').style.display='none';
+  document.getElementById('incident-workspace').style.display='block';
+  setCrumbs([['Home',()=>go('home')],['Incidents',()=>{go('incidents');}],[incident_id,null]]);
+  if(meta&&meta.file){ await analyzeStatic(meta.file); }
+  else{
+    document.getElementById('inc-title').innerText='Incident: '+incident_id;
+    document.getElementById('inc-desc').innerText='Run RCA to investigate, or review past runs below.';
+    LAST_INCIDENT=incident_id;
+    await refreshWorkspaceExtras(incident_id);
+    document.getElementById('rca-output').style.display='none';
+  }
+}
+async function analyzeStatic(file){
+  const data=await (await fetch('/api/analyze/'+file)).json();
+  renderRCA(data);
+}
+function toggleCreateForm(){
+  const f=document.getElementById('create-form');
+  f.style.display=f.style.display==='none'?'block':'none';
+  if(f.style.display==='block'){ loadCreateProjects(); buildSimDescriptions(); }
+}
+function createTab(which){
+  document.getElementById('tab-manual').classList.toggle('on',which==='manual');
+  document.getElementById('tab-sim').classList.toggle('on',which==='sim');
+  document.getElementById('create-manual').style.display=which==='manual'?'block':'none';
+  document.getElementById('create-sim').style.display=which==='sim'?'block':'none';
+}
+async function loadCreateProjects(){
+  try{
+    const ps=await (await fetch('/api/projects')).json();
+    document.getElementById('ci-project').innerHTML=ps.map(p=>`<option value="${esc(p.project_id)}">${esc(p.name)}</option>`).join('');
+  }catch(e){}
+}
+function buildSimDescriptions(){
+  const box=document.getElementById('create-sim-list'); if(!box||!TAX) return;
+  const descs={'bad-deployment':'Injects errors representing a faulty application revision deployed shortly before elevated failures.','pool-exhaustion':'Saturates the database connection pool under concurrent load.','config-error':'Applies a broken environment/config value to config-gated endpoints.','malformed-payload':'Sends invalid request payloads producing client-side 400s.','auth-failure':'Presents expired credentials producing auth failures.','dependency-failure':'Makes the downstream orders dependency return 503s.','db-timeout':'Makes database calls time out with normal compute.','traffic-overload':'Floods the service beyond instance capacity.','memory-leak':'Gradually increases memory usage and produces GC/OOM indicators.','cpu-exhaustion':'Runs a compute-heavy endpoint saturating CPU.','network-timeout':'Stalls downstream responses until timeout.','rate-limit':'Bursts requests past quota producing 429s.'};
+  const grp=(title,slugs)=>`<h5>${title}</h5>`+slugs.map(s=>`<div style="margin-bottom:8px"><button class="sim-btn" onclick="simulate('${s}')">${esc((TAX.labels||{})[s]||s)}</button><div style="font-size:.76rem;color:var(--text-muted)">${esc(descs[s]||'')}</div></div>`).join('');
+  box.innerHTML=`<h5>Code / Application Errors</h5>`+
+    grp('Configuration',['bad-deployment','config-error'])+grp('Application Logic',['malformed-payload','auth-failure'])+
+    grp('Application Dependency',['dependency-failure','db-timeout'])+grp('Application Resource',['pool-exhaustion'])+
+    `<h5>Infrastructure / Platform Errors</h5>`+
+    grp('Compute',['cpu-exhaustion','memory-leak'])+grp('Network',['network-timeout'])+grp('Capacity',['traffic-overload'])+grp('Quota',['rate-limit']);
+}
+async function createManual(){
+  const out=document.getElementById('ci-create-result');
+  const body={title:document.getElementById('ci-title').value.trim(),
+    environment:document.getElementById('ci-env').value, severity:document.getElementById('ci-sev').value,
+    affected_services:document.getElementById('ci-services').value.split(',').map(s=>s.trim()).filter(Boolean),
+    description:document.getElementById('ci-desc').value.trim(), start_time:document.getElementById('ci-start').value.trim(),
+    trace_id:document.getElementById('ci-trace').value.trim(), request_id:document.getElementById('ci-req').value.trim(),
+    error_signature:document.getElementById('ci-err').value.trim(), revision:document.getElementById('ci-rev').value.trim(),
+    context:document.getElementById('ci-context').value.trim()};
+  if(!body.title){ out.innerText='Title is required.'; return; }
+  const pid=document.getElementById('ci-project').value;
+  const r=await fetch('/api/projects/'+pid+'/incidents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!r.ok){ out.innerText=d.detail||'creation failed'; return; }
+  out.innerText='Created '+d.incident_id;
+  await openIncident(d.incident_id);
+}
+/* ---- workspace extras ---- */
+const WF_STEPS=[['Incident Detected','inc-title'],['Evidence Collected','log-summary'],['Evidence Correlated','live-logs'],['Root Cause Identified','rca-output'],['Remediation Proposed','remediation-box'],['Approval Required','approval-box'],['PR Created','codefix-output'],['Resolution','related-pr']];
+function renderStepper(detail){
+  const box=document.getElementById('wf-stepper'); if(!box) return;
+  const status=(detail.incident||{}).status||'Open';
+  const hist=((detail.incident||{}).history||[]).map(h=>h.to);
+  const order=['NEW','COLLECTING_EVIDENCE','ANALYZING','ROOT_CAUSE_IDENTIFIED','REMEDIATION_PROPOSED','WAITING_APPROVAL','PR_CREATED','RESOLVED'];
+  const ts={}; ((detail.incident||{}).history||[]).forEach(h=>{ if(h.to&&!ts[h.to]) ts[h.to]=h.at; });
+  const failed=status==='FAILED';
+  const idx=order.indexOf(status);
+  box.innerHTML=WF_STEPS.map((s,i)=>{
+    let cls='skip', sub='pending', stamp=ts[order[i]]||'';
+    if(failed&&i===(idx<0?0:idx)){ cls='fail'; sub='failed'; }
+    else if(idx>=0&&i<idx){ cls='done'; sub='completed'; }
+    else if(idx>=0&&i===idx){ cls=(status==='RESOLVED')?'done':'run'; sub=(status==='RESOLVED')?'completed':'running'; }
+    else if(status==='Open'&&i===0){ cls='run'; sub='running'; }
+    return `<div class="step ${cls}" title="${esc(s[0])}${stamp?(' — '+esc(stamp)):' — '+sub}" onclick="document.getElementById('${s[1]}')&&document.getElementById('${s[1]}').scrollIntoView({behavior:'smooth',block:'center'})"><div class="t">${esc(s[0])}</div><div class="s">${sub}${stamp?(' · '+esc(String(stamp).slice(11,16))):''}</div></div>`;
+  }).join('');
+}
+function inferEvType(text){
+  const t=(text||'').toLowerCase();
+  if(/revision|deployed|deployment|traffic/.test(t)) return 'DEPLOYMENT';
+  if(/trace|span/.test(t)) return 'TRACE';
+  if(/p95|latency|cpu|memory|5xx|error rate|request/.test(t)) return 'METRIC';
+  if(/runbook|historical|incident inc-|similar/.test(t)) return 'HISTORY';
+  return 'APPLICATION_LOG';
+}
+function renderEvidenceStructured(listEl, items, emptyText){
+  const box=document.getElementById(listEl); if(!box) return;
+  if(!items||!items.length){ box.innerHTML=`<p style="color:var(--text-muted);font-size:.85rem">${esc(emptyText)}</p>`; return; }
+  box.innerHTML=items.map(e=>{
+    const tp=inferEvType(e);
+    return `<div class="evidence-box"><span class="pill info">${tp}</span> <span style="font-size:.72rem;color:var(--text-muted)">inferred · ${listEl==='evidence-list'?'Direct/Indirect':'does not overturn RCA'}</span><div style="margin-top:4px">${esc(e)}</div></div>`;
+  }).join('');
+}
+function renderBlast(data){
+  const el=document.getElementById('rc-blast'); if(!el) return;
+  const b=data.blast_radius;
+  if(!b){ el.innerText='—'; return; }
+  if(typeof b==='string'){ el.innerText=b; return; }
+  const parts=[];
+  if(b.classification) parts.push(b.classification);
+  if(b.estimated_scope) parts.push(b.estimated_scope);
+  if(b.affected_services&&b.affected_services.length) parts.push('Services: '+b.affected_services.join(', '));
+  if(b.affected_endpoints&&b.affected_endpoints.length) parts.push('Endpoints: '+b.affected_endpoints.join(', '));
+  el.innerText=parts.join(' · ')||JSON.stringify(b);
+}
+function renderRcExtras(data){
+  const dom=document.getElementById('rc-domain');
+  if(dom) dom.innerHTML=`<strong>Domain:</strong> ${esc(data.error_domain||'Unknown')} · <strong>Subcategory:</strong> ${esc(data.error_subcategory||'Unknown')} · <strong>Source:</strong> ${esc(data.evidence_source||'live')}`;
+  const why=document.getElementById('rc-why');
+  if(why){
+    const hyps=(data.hypotheses||[]).slice(0,3);
+    const verdict={}; (data.validations||[]).forEach(v=>{verdict[v.hypothesis_id]=v.validation_status;});
+    why.innerHTML=hyps.length?('<strong>Why this conclusion:</strong>'+hyps.map(h=>`<div style="margin-top:4px">• <strong>${esc(h.root_cause_category)}</strong> (${Math.round((h.confidence_score||0)*100)}%, ${esc(verdict[h.hypothesis_id]||'unreviewed')}) — ${esc((h.reasoning_summary||'').slice(0,220))}</div>`).join('')):'';
+  }
+  renderEvidenceStructured('evidence-list', data.evidence||data.supporting_evidence||[], 'No supporting evidence cited.');
+  renderEvidenceStructured('contra-list', data.contradictory_evidence||[], 'No meaningful contradictory evidence was identified.');
+}
+async function refreshWorkspaceExtras(incident_id){
+  if(!incident_id) return;
+  try{
+    const d=await (await fetch('/api/incidents/'+incident_id)).json();
+    const inc=d.incident||{};
+    renderStepper(d);
+    const meta=document.getElementById('inc-meta');
+    if(meta) meta.innerHTML=`Project: <strong>${esc(inc.project_id||d.file_meta&&d.file_meta.project_id||'')}</strong> · Env: ${esc(inc.environment||'prod')} · Severity: ${esc(inc.severity||'')} · Status: ${esc(inc.status||'Open')} · Started: ${esc(fmtTime(inc.started_at||''))}`;
+    const chip=document.getElementById('ws-project-chip');
+    if(chip) chip.innerText='Project: '+(inc.project_id||'');
+    const runs=document.getElementById('rca-runs');
+    if(runs) runs.innerHTML=(d.rca_runs||[]).length?d.rca_runs.map(r=>`<div class="evidence-box"><strong>Run #${r.run_number}</strong> ${esc(r.category||'')} · ${Math.round((r.confidence||0)*100)}% · ${esc(r.evidence_source||'')} · ${esc(r.duration_s!=null?r.duration_s+'s':'')}<br/><span style="font-size:.75rem;color:var(--text-muted)">${esc(r.at||'')}</span></div>`).join(''):'<span style="font-size:.8rem;color:var(--text-muted)">No runs yet.</span>';
+    const notes=document.getElementById('notes-list');
+    if(notes) notes.innerHTML=(d.notes||[]).length?d.notes.map(n=>`<div class="evidence-box"><strong>${esc(n.author)}</strong> <span style="font-size:.72rem;color:var(--text-muted)">${esc(fmtTime(n.at))}</span><br/>${esc(n.text)}</div>`).join(''):'<span style="font-size:.8rem;color:var(--text-muted)">No notes yet.</span>';
+    const rel=document.getElementById('related-pr');
+    if(rel){
+      const prs=d.pull_requests||[];
+      rel.innerHTML=prs.length?prs.map(p=>`<div class="evidence-box"><strong>PR #${p.pr_number||'?'} ${esc(p.title||'')}</strong><br/>Branch: ${esc(p.branch||'')} · Status: ${esc(p.status||'')} · Tests: ${esc(p.tests_status||'')}<br/><button class="sim-btn" onclick="go('prs','${esc(p.pr_id)}')">View PR</button></div>`).join(''):'<span style="font-size:.8rem;color:var(--text-muted)">No pull request raised for this incident.</span>';
+    }
+    const tl=document.getElementById('approval-timeline');
+    if(tl){
+      const evs=((await (await fetch('/api/incidents/'+incident_id+'/activity')).json())||[]).filter(e=>/APPROVAL|REMEDIATION|PR_/.test(e.event||''));
+      tl.innerHTML=evs.length?('<div class="timeline">'+evs.map(e=>`<div><span class="ts">${esc(fmtTime(e.timestamp))}</span><br/><strong>${esc(e.event)}</strong> — ${esc(e.description||'')} <span style="color:var(--text-muted)">(${esc(e.actor||'')})</span></div>`).join('')+'</div>'):'<span style="font-size:.8rem;color:var(--text-muted)">No approval events yet.</span>';
+    }
+  }catch(e){ /* workspace extras must never break RCA display */ }
+}
+async function addNote(){
+  const inp=document.getElementById('note-input');
+  const text=(inp.value||'').trim();
+  if(!text||!LAST_INCIDENT) return;
+  await fetch('/api/incidents/'+LAST_INCIDENT+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+  inp.value='';
+  refreshWorkspaceExtras(LAST_INCIDENT);
+}
+async function copyRcaSummary(){
+  const d=window._lastRcaData;
+  if(!d){ alert('Run RCA first'); return; }
+  const txt='Incident '+d.incident_id+' | Impact: '+(d.affected_services||[]).join(', ')+' | Root cause: '+d.root_cause+' ('+Math.round((d.confidence_score||d.confidence||0)*100)+'%) | Evidence: '+(d.evidence||d.supporting_evidence||[]).slice(0,3).join('; ')+' | Remediation: '+(d.recommended_action||d.recommended_next_action||'');
+  try{ await navigator.clipboard.writeText(txt); alert('RCA summary copied'); }
+  catch(e){ prompt('Copy RCA summary:', txt); }
+}
+async function exportRca(fmt){
+  if(!LAST_INCIDENT){ alert('Run RCA first'); return; }
+  const r=await fetch('/api/incidents/'+LAST_INCIDENT+'/export?format='+fmt);
+  if(!r.ok){ alert('Export unavailable: run RCA first'); return; }
+  const blob=fmt==='json'?new Blob([JSON.stringify(await r.json(),null,2)],{type:'application/json'}):new Blob([await r.text()],{type:'text/markdown'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=LAST_INCIDENT+'-rca.'+(fmt==='json'?'json':'md');
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+function updateRcaGate(){
+  const btn=document.getElementById('rca-btn'); if(!btn) return;
+  if(btn.innerText.indexOf('Working')===0) return;
+  const gate=document.getElementById('rca-gate');
+  if(!LOGS.length){ btn.disabled=true; if(gate) gate.innerText='Waiting for sufficient evidence: no logs collected yet. Simulate an incident or upload logs first.'; }
+  else{ btn.disabled=false; if(gate) gate.innerText='Run the RCA agent against the currently collected incident evidence. The agent will correlate logs, metrics, deployments, traces, infrastructure state, and code changes before proposing a root cause.'; }
+}
+
+
+/* ===== platform: theme, home, projects, PRs, uploads, settings ===== */
+function initTheme(){
+  let t=null;
+  try{ t=localStorage.getItem('rca-theme'); }catch(e){}
+  if(!t||t==='system'){ t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark'; }
+  applyTheme(t, true);
+  document.querySelectorAll('input[name="theme"]').forEach(r=>{ r.checked=(r.value===(localStorage.getItem('rca-theme')||'system')); });
+}
+function applyTheme(t, silent){
+  document.documentElement.dataset.theme=(t==='light')?'light':'dark';
+}
+function setTheme(t){
+  try{ localStorage.setItem('rca-theme', t); }catch(e){}
+  initTheme();
+}
+function toggleTheme(){
+  const cur=document.documentElement.dataset.theme==='light'?'dark':'light';
+  setTheme(cur);
+}
+/* ---- home ---- */
+const EV_ICON={'INCIDENT_CREATED':'◉','SIMULATION_STARTED':'▲','RCA_STARTED':'◆','ROOT_CAUSE_IDENTIFIED':'✓','REMEDIATION_PROPOSED':'✎','APPROVAL_REQUESTED':'•','APPROVAL_APPROVED':'✓','APPROVAL_REJECTED':'✕','FIX_PROPOSED':'✎','FIX_APPROVED':'✓','FIX_REJECTED':'✕','FIX_APPLIED':'✓','PR_CREATED':'⎇','PR_FAILED':'!','LOG_COLLECTED':'≡','PROJECT_CREATED':'＋','STATUS_RESOLVED':'✓','INCIDENT_RESOLVED':'✓','EXECUTION':'▶','VERIFICATION':'✔'};
+async function loadHome(){
+  try{
+    const s=await (await fetch('/api/home/stats')).json();
+    const set=(id,v)=>{const e=document.getElementById(id); if(e) e.innerText=v;};
+    set('hm-projects',s.projects); set('hm-incidents',s.open_incidents); set('hm-rca',s.rca_completed);
+    set('hm-prs',s.prs_created); set('hm-approvals',s.pending_approvals);
+    const act=document.getElementById('hm-activity');
+    if(act) act.innerHTML=(s.recent_activity||[]).length?s.recent_activity.map(e=>`<div style="font-size:.8rem;padding:4px 0;border-bottom:1px solid var(--border-color)">${esc(EV_ICON[e.event]||'•')} <strong>${esc(e.event)}</strong> ${esc(e.incident_id||'')} <span style="color:var(--text-muted)">${esc(e.description||'')} · ${esc(timeAgo(e.timestamp))}</span></div>`).join(''):'<span style="color:var(--text-muted)">No activity yet.</span>';
+    const prs=document.getElementById('hm-recent-prs');
+    if(prs) prs.innerHTML=(s.recent_prs||[]).length?s.recent_prs.map(p=>`<div style="font-size:.8rem;padding:4px 0"><button class="sim-btn" onclick="go('prs','${esc(p.pr_id)}')">PR #${p.pr_number||'?'}</button> <strong>${esc(p.title||'').slice(0,60)}</strong><br/><span style="color:var(--text-muted)">${esc(p.incident_id||'')} · ${esc(p.status||'')}</span></div>`).join(''):'<span style="color:var(--text-muted)">No agent PRs yet.</span>';
+  }catch(e){ /* home must never break boot */ }
+}
+/* ---- projects ---- */
+async function loadProjects(){
+  const box=document.getElementById('projects-list'); if(!box) return;
+  box.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';
+  try{
+    const ps=await (await fetch('/api/projects')).json();
+    box.innerHTML=ps.length?ps.map(p=>`<div class="stat-card"><div class="num" style="font-size:1.05rem">${esc(p.name)}</div>`+
+      `<div class="lbl">${esc(p.project_id)} · ${esc(p.environment||'')} · ${esc((p.services||[]).join(', ')||'no services')}</div>`+
+      `<div style="font-size:.76rem;margin-top:6px">${p.status==='active'?'✓ active':'• '+esc(p.status)} · ${p.open_incidents} open incident(s) · ${p.open_prs} open PR(s)</div>`+
+      `<div style="font-size:.74rem;color:var(--text-muted);margin-top:4px">Sources: ${(p.data_sources||[]).map(s=>esc(s.kind)+':'+esc(s.status)).join(' · ')||'none'} · Access: ${esc(p.repo_access||'')}</div>`+
+      `<div style="margin-top:8px"><button class="sim-btn" onclick="openProject('${esc(p.project_id)}')">Open</button></div></div>`).join('')
+      :'<div class="card">No projects onboarded yet.</div>';
+  }catch(e){ box.innerHTML='<div class="card">Failed to load projects. <button class="sim-btn" onclick="loadProjects()">Retry</button></div>'; }
+}
+async function loadSideProjects(){
+  const box=document.getElementById('side-projects'); if(!box) return;
+  try{
+    const ps=await (await fetch('/api/projects')).json();
+    box.innerHTML=ps.map(p=>`<div class="incident-card" onclick="openProject('${esc(p.project_id)}')"><h4>${esc(p.name)}</h4><p>${esc(p.project_id)} · ${esc(p.environment||'')} · ${p.open_incidents} open</p></div>`).join('')||'<p style="font-size:.75rem;color:var(--text-muted)">None</p>';
+  }catch(e){ box.innerHTML=''; }
+}
+async function openProject(pid, tab){
+  go('projects');
+  const box=document.getElementById('project-detail'); if(!box) return;
+  box.innerHTML='<div class="skeleton"></div>';
+  try{
+    const p=await (await fetch('/api/projects/'+pid)).json();
+    const t=tab||'overview';
+    box.innerHTML=`<div class="card"><div class="card-title">${esc(p.name)} <span style="font-size:.75rem;color:var(--text-muted)">${esc(p.project_id)}</span></div>
+      <div style="font-size:.82rem">Repository: ${esc(p.repository_url||p.local_path||'—')} (${esc(p.provider||'')}) · Branch: ${esc(p.default_branch||'')} · Env: ${esc(p.environment||'')} · Region: ${esc(p.region||'')} · Services: ${esc((p.services||[]).join(', ')||'—')}</div>
+      <div class="tabs">
+        <button class="${t==='overview'?'on':''}" onclick="openProject('${esc(pid)}','overview')">Overview</button>
+        <button class="${t==='incidents'?'on':''}" onclick="openProject('${esc(pid)}','incidents')">Incidents</button>
+        <button class="${t==='prs'?'on':''}" onclick="openProject('${esc(pid)}','prs')">Pull Requests</button>
+        <button class="${t==='config'?'on':''}" onclick="openProject('${esc(pid)}','config')">Configuration</button>
+      </div><div id="project-tab-body"></div></div>`;
+    const body=document.getElementById('project-tab-body');
+    if(t==='overview'){
+      const open=(p.incidents||[]).filter(i=>!['RESOLVED','FAILED'].includes(i.status));
+      body.innerHTML=`<div class="cards">
+        <div class="stat-card"><div class="num">${open.length}</div><div class="lbl">Open Incidents</div></div>
+        <div class="stat-card"><div class="num">${(p.incidents||[]).filter(i=>i.status==='RESOLVED').length}</div><div class="lbl">Resolved</div></div>
+        <div class="stat-card"><div class="num">${(p.pull_requests||[]).length}</div><div class="lbl">Agent PRs</div></div>
+        <div class="stat-card"><div class="num">${esc(p.last_scan?timeAgo(p.last_scan):'never')}</div><div class="lbl">Last Scan</div></div></div>
+        <strong>Recent incidents</strong>
+        ${(p.incidents||[]).slice(0,5).map(i=>`<div class="evidence-box"><strong>${esc(i.incident_id)}</strong> ${esc(i.title||'')} ${statusPill(i.status)}</div>`).join('')||'<p style="color:var(--text-muted)">None</p>'}
+        <strong>Data Sources</strong>
+        ${(p.data_sources||[]).map(s=>`<div class="evidence-box">${esc(s.kind)}: ${s.status==='connected'?'✓ connected':'• '+esc(s.status)} ${esc(s.detail||'')} <button class="sim-btn" onclick="testSource('${esc(pid)}','${esc(s.kind)}')">Test</button> ${s.kind==='git'?`<button class="sim-btn" onclick="disconnectSource('${esc(pid)}','git')">Disconnect</button>`:''}</div>`).join('')||'<p style="color:var(--text-muted)">None connected</p>'}`;
+    } else if(t==='incidents'){
+      body.innerHTML=(p.incidents||[]).map(i=>`<div class="evidence-box"><strong>${esc(i.incident_id)}</strong> ${esc(i.title||'')} ${statusPill(i.status)}<br/><button class="sim-btn" onclick="openIncident('${esc(i.incident_id)}')">Open RCA</button></div>`).join('')||'<p style="color:var(--text-muted)">No incidents found for this project.</p>';
+    } else if(t==='prs'){
+      body.innerHTML=(p.pull_requests||[]).map(r=>`<div class="evidence-box"><strong>PR #${r.pr_number||'?'}</strong> ${esc(r.title||'')} ${statusPill(r.status)}<br/><button class="sim-btn" onclick="go('prs','${esc(r.pr_id)}')">View PR</button></div>`).join('')||'<p style="color:var(--text-muted)">No pull requests have been created from RCA remediations.</p>';
+    } else {
+      const d=p.detected||{};
+      body.innerHTML=`<div style="font-size:.84rem">Languages: ${esc((d.languages||[]).join(', ')||'—')}<br/>Frameworks: ${esc((d.frameworks||[]).join(', ')||'—')}<br/>Services: ${esc((d.services||[]).join(', ')||'—')}<br/>Tests: ${(d.tests||[]).length} file(s) · Dockerfiles: ${(d.dockerfiles||[]).length} · CI: ${(d.ci_files||[]).length}<br/>Repository Access: <strong>${esc(p.repo_access||'READ_ONLY')}</strong> (PR creation ${p.repo_access==='PR_CREATION_ENABLED'?'enabled':'requires CODE_CHANGE approval gating'})</div>
+      <div style="margin-top:8px;display:flex;gap:6px"><button class="sim-btn" onclick="rescanProject('${esc(pid)}')">Re-scan Repository</button><button class="sim-btn" onclick="testSource('${esc(pid)}','git')">Test Connection</button><button class="sim-btn" onclick="disconnectSource('${esc(pid)}','git')">Disconnect Repository</button></div><div id="proj-cfg-msg" style="font-size:.8rem;margin-top:6px"></div>`;
+    }
+  }catch(e){ box.innerHTML='<div class="card">Failed to load project. <button class="sim-btn" onclick="openProject(\''+pid+'\')">Retry</button></div>'; }
+}
+let WIZ={step:1,mode:'new',data:{}};
+function openOnboard(mode){
+  WIZ={step:(mode==='repo'?2:(mode==='cloud'?3:1)),mode:mode||'new',data:{}};
+  document.getElementById('modal').classList.add('open');
+  renderWizard();
+}
+function closeModal(){ document.getElementById('modal').classList.remove('open'); }
+function wizSet(k,v){ WIZ.data[k]=v; }
+async function renderWizard(){
+  const w=document.getElementById('wizard');
+  const steps=['Project','Repository','Cloud','Scan','Confirm'];
+  let body='';
+  body+=`<div class="wiz-steps">`+steps.map((s,i)=>`<span class="${WIZ.step===i+1?'on':''}">${i+1} · ${s}</span>`).join('')+`</div>`;
+  const d=WIZ.data, inp=(k,ph)=>`<input id="wz-${k}" value="${esc(d[k]||'')}" placeholder="${esc(ph||'')}" oninput="wizSet('${k}',this.value)" />`;
+  const sel=(k,opts)=>`<select id="wz-${k}" onchange="wizSet('${k}',this.value)">${opts.map(o=>`<option${d[k]===o?' selected':''}>${o}</option>`).join('')}</select>`;
+  if(WIZ.step===1){ body+=`<h3>Basic Project Details</h3><label>Project Name</label>${inp('name','Checkout Platform')}<label>Description</label>${inp('description','')}<label>Environment</label>${sel('environment',['production','staging','dev'])}<label>Team / Owner</label>${inp('team_owner','sre')}`; }
+  if(WIZ.step===2){ body+=`<h3>Source Repository</h3><label>Git Provider</label>${sel('provider',['github','local'])}<label>Repository URL</label>${inp('repository_url','https://github.com/...git')}<label>Default Branch</label>${inp('default_branch','main')}<label>Repository Path if local</label>${inp('local_path','cloud-rca-demo-app')}<label>Service Path / Monorepo Subdirectory (optional)</label>${inp('service_path','services/checkout')}`; }
+  if(WIZ.step===3){ body+=`<h3>Google Cloud Configuration</h3><label>GCP Project ID</label>${inp('gcp_project_id','')}<label>Region</label>${inp('region','us-central1')}<label>Cloud Run services (comma separated)</label>${inp('services','checkout-service')}<div style="font-size:.78rem;color:var(--text-muted)">Telemetry, metrics, traces and deployments are read through existing providers when credentials exist; nothing is faked.</div>`; }
+  if(WIZ.step===4){ body+=`<h3>Repository Scan</h3><div id="wiz-scan"><span style="color:var(--text-muted)">Scanning (read-only)…</span></div>`; }
+  if(WIZ.step===5){ const r=WIZ.result||{}; body+=`<h3>Confirm</h3><div style="font-size:.85rem">Services: ${esc(((r.scan||{}).services||[]).join(', ')||'none detected')}<br/>Branch: ${esc(d.default_branch||'main')}<br/>Tests: ${((r.scan||{}).tests||[]).length} file(s)<br/>RCA readiness: ${(r.readiness&&r.readiness.rca_ready)?'✓ ready':'• see reasons'}<br/><span style="color:var(--text-muted)">${esc(((r.readiness||{}).reasons||[]).join('; '))}</span></div>`; }
+  body+=`<div style="display:flex;gap:8px;margin-top:12px"><button class="sim-btn" onclick="closeModal()">Cancel</button><span style="flex:1"></span>`;
+  if(WIZ.step>1) body+=`<button class="sim-btn" onclick="wizNav(-1)">Back</button>`;
+  body+=`<button class="btn btn-primary" onclick="wizNav(1)">${WIZ.step===5?'Complete Onboarding':(WIZ.step===4?'Scan Again':'Next')}</button></div>`;
+  w.innerHTML=body;
+  ['name','description','team_owner','repository_url','default_branch','local_path','service_path','gcp_project_id','region','services'].forEach(k=>{const el=document.getElementById('wz-'+k); if(el) el.value=d[k]||'';});
+  if(WIZ.step===4) wizDoScan();
+}
+async function wizNav(dir){
+  if(dir<0){ WIZ.step=Math.max(1,WIZ.step-1); renderWizard(); return; }
+  if(WIZ.step===1&&!(WIZ.data.name||'').trim()){ alert('Project name is required'); return; }
+  if(WIZ.step===5){ await wizSubmit(); return; }
+  WIZ.step=Math.min(5,WIZ.step+1); renderWizard();
+}
+async function wizDoScan(){
+  const box=document.getElementById('wiz-scan'); if(!box) return;
+  const payload={name:WIZ.data.name||'unnamed',description:WIZ.data.description||'',environment:WIZ.data.environment||'production',team_owner:WIZ.data.team_owner||'',provider:WIZ.data.provider||'github',repository_url:WIZ.data.repository_url||'',default_branch:WIZ.data.default_branch||'main',local_path:WIZ.data.local_path||'',gcp_project_id:WIZ.data.gcp_project_id||'',region:WIZ.data.region||'us-central1',services:(WIZ.data.services||'').split(',').map(s=>s.trim()).filter(Boolean)};
+  const r=await fetch('/api/projects/onboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const d=await r.json();
+  if(!r.ok){ box.innerHTML='<span style="color:var(--danger,#c0564d)">Onboarding failed: '+esc(d.detail||r.status)+'</span>'; return; }
+  WIZ.result=d; WIZ.project_id=d.project.project_id;
+  const s=d.scan||{};
+  box.innerHTML=`<div style="font-size:.85rem">Languages: ${esc((s.languages||[]).join(', ')||'—')}<br/>Frameworks: ${esc((s.frameworks||[]).join(', ')||'—')}<br/>Services: ${esc((s.services||[]).join(', ')||'—')}<br/>Dockerfiles: ${(s.dockerfiles||[]).length} · Tests: ${(s.tests||[]).length} · CI: ${(s.ci_files||[]).length} · Files scanned: ${s.file_count||0}${s.error?('<br/>Note: '+esc(s.error)):''}</div><div style="font-size:.8rem;margin-top:6px">RCA readiness: ${(d.readiness&&d.readiness.rca_ready)?'✓ ready':'• '+(esc(((d.readiness||{}).reasons||[]).join('; '))||'see reasons')}</div>`;
+}
+async function wizSubmit(){ closeModal(); loadProjects(); loadSideProjects(); go('projects',WIZ.project_id||''); }
+async function rescanProject(pid){
+  const m=document.getElementById('proj-cfg-msg'); if(m) m.innerText='Scanning…';
+  const r=await fetch('/api/projects/'+pid+'/scan',{method:'POST'});
+  if(m) m.innerText=r.ok?'Re-scan complete.':'Re-scan failed.';
+  if(r.ok) openProject(pid,'config');
+}
+async function testSource(pid,kind){
+  const r=await fetch('/api/projects/'+pid+'/test-connection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind})});
+  const d=await r.json();
+  alert(kind+': '+(d.ok?'✓ connected — '+d.detail:'✕ '+d.detail));
+}
+async function disconnectSource(pid,kind){
+  if(!confirm('Disconnect '+kind+' from this project?')) return;
+  await fetch('/api/projects/'+pid+'/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind})});
+  openProject(pid,'config'); loadProjects();
+}
+/* ---- pull requests ---- */
+let ALL_PRS=[];
+async function loadPRs(){
+  try{
+    const ps=await (await fetch('/api/projects')).json();
+    const sel=document.getElementById('pr-filter-project');
+    const cur=sel.value;
+    sel.innerHTML='<option value="">All projects</option>'+ps.map(p=>`<option value="${esc(p.project_id)}">${esc(p.name)}</option>`).join('');
+    if([...sel.options].some(o=>o.value===cur)) sel.value=cur;
+    renderPRs();
+  }catch(e){}
+}
+async function renderPRs(){
+  const body=document.getElementById('prs-list'); if(!body) return;
+  const proj=document.getElementById('pr-filter-project').value;
+  const st=document.getElementById('pr-filter-status').value;
+  let url='/api/pull-requests'+(proj?'?project='+encodeURIComponent(proj):'');
+  try{ ALL_PRS=await (await fetch(url)).json(); }catch(e){ ALL_PRS=[]; }
+  const rows=ALL_PRS.filter(p=>!st||p.status===st);
+  document.getElementById('pr-count').innerText=rows.length+' PR(s)';
+  body.innerHTML=rows.length?rows.map(p=>`<tr class="clickable" onclick="openPR('${esc(p.pr_id)}')">`+
+    `<td><strong>PR #${p.pr_number||'?'}</strong></td><td><a onclick="event.stopPropagation();openIncident('${esc(p.incident_id)}')">${esc(p.incident_id||'')}</a></td>`+
+    `<td>${esc(p.project_id||'')}</td><td>${esc((p.title||'').slice(0,70))}</td><td>${esc(fmtTime(p.created_at))}</td>`+
+    `<td>${esc(p.risk||'')}</td><td>${esc(p.tests_status||'')}</td><td>${statusPill(p.status)}</td></tr>`).join('')
+    :'<tr><td colspan="8">No pull requests have been created from RCA remediations.</td></tr>';
+}
+async function openPR(pr_id){
+  go('prs');
+  const box=document.getElementById('pr-detail'); if(!box) return;
+  box.innerHTML='<div class="skeleton"></div>';
+  setCrumbs([['Home',()=>go('home')],['Pull Requests',()=>go('prs')],[pr_id,null]]);
+  try{
+    const p=await (await fetch('/api/pull-requests/'+pr_id)).json();
+    box.innerHTML=`<div class="card"><div class="card-title">PR #${p.pr_number||'?'} ${esc(p.title||'')}</div>
+      <div style="font-size:.84rem">Incident: <a onclick="openIncident('${esc(p.incident_id)}')">${esc(p.incident_id||'')}</a> · Project: ${esc(p.project_id||'')} · Repository: ${esc(p.repository||'')} · Branch: ${esc(p.branch||'')} → ${esc(p.base_branch||'')} · Commit: ${esc(p.commit_sha||'')} · Created: ${esc(fmtTime(p.created_at))} · Status: ${statusPill(p.status)}</div>
+      <div style="margin-top:10px"><strong>RCA Summary</strong><div class="evidence-box">${esc(p.root_cause||'')} (${Math.round((p.confidence||0)*100)}%)<br/><span style="color:var(--text-muted)">${(p.supporting_evidence||[]).slice(0,4).map(esc).join('<br/>')}</span></div></div>
+      <div><strong>Code Changes</strong> (${esc((p.files_changed||[]).join(', '))} +${p.additions} -${p.deletions})</div>
+      <pre style="background:#000;border:1px solid var(--border-color);border-radius:6px;padding:12px;overflow-x:auto;font-size:.76rem;white-space:pre-wrap">${esc(p.diff||'diff not stored for this PR')}</pre>
+      <div><strong>Tests:</strong> ${esc(p.tests_status||'')} <pre style="background:#000;border:1px solid var(--border-color);border-radius:6px;padding:10px;max-height:200px;overflow:auto;font-size:.75rem;white-space:pre-wrap">${esc((p.tests_output||'').slice(-1500))}</pre></div>
+      <div><strong>Approval:</strong> ${esc(p.approval_id||'')} by ${esc(p.approved_by||'')} at ${esc(fmtTime(p.approved_at))}</div>
+      <div style="margin-top:8px">${p.external_url?`<a class="btn btn-primary" href="${esc(p.external_url)}" target="_blank" rel="noopener">View on GitHub</a>`:'<span style="color:var(--text-muted)">No external URL (creation blocked or mocked).</span>'}</div></div>`;
+  }catch(e){ box.innerHTML='<div class="card">PR not found.</div>'; }
+}
+/* ---- analyze logs ---- */
+async function loadAnalyzeInit(){
+  try{
+    const ps=await (await fetch('/api/projects')).json();
+    const sel=document.getElementById('up-project');
+    if(sel&&!sel.options.length) sel.innerHTML=ps.map(p=>`<option value="${esc(p.project_id)}">${esc(p.name)}</option>`).join('');
+  }catch(e){}
+  refreshAnalyses();
+  const dz=document.getElementById('dropzone');
+  if(dz&&!dz.dataset.bound){
+    dz.dataset.bound='1';
+    ['dragover','dragenter'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.style.borderColor='#fff';}));
+    ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.style.borderColor='#4a4a4a';}));
+    dz.addEventListener('drop',e=>{ document.getElementById('up-files').files=e.dataTransfer.files; renderUpFiles(); });
+    document.getElementById('up-files').addEventListener('change',renderUpFiles);
+  }
+}
+function renderUpFiles(){
+  const inp=document.getElementById('up-files');
+  document.getElementById('up-filelist').innerHTML=[...inp.files].map(f=>`<div style="font-size:.8rem">${esc(f.name)} · ${(f.size/1024).toFixed(1)} KB</div>`).join('')||'';
+}
+let UP_ANALYSIS=null;
+async function uploadLogs(){
+  const inp=document.getElementById('up-files');
+  if(!inp.files.length){ alert('Choose at least one log file'); return; }
+  const btn=document.getElementById('up-btn'); btn.disabled=true; btn.innerText='Uploading…';
+  const fd=new FormData();
+  fd.append('project_id',document.getElementById('up-project').value||'unassigned');
+  fd.append('source_type',document.getElementById('up-source').value);
+  fd.append('service',document.getElementById('up-service').value);
+  fd.append('incident_start',document.getElementById('up-start').value);
+  fd.append('region',document.getElementById('up-region').value);
+  fd.append('environment',document.getElementById('up-env').value);
+  fd.append('description',document.getElementById('up-desc').value);
+  [...inp.files].slice(0,4).forEach(f=>fd.append('files',f,f.name));
+  const r=await fetch('/api/logs/upload',{method:'POST',body:fd});
+  const d=await r.json();
+  btn.disabled=false; btn.innerText='Upload & Preview';
+  if(!r.ok){ alert(d.detail||'upload failed'); return; }
+  UP_ANALYSIS=d.analysis_id;
+  const pc=document.getElementById('up-preview-card'); pc.style.display='block';
+  document.getElementById('up-preview').innerHTML=
+    d.files.map(f=>`<div class="evidence-box"><strong>${esc(f.filename)}</strong> ${(f.size_bytes/1024).toFixed(1)} KB · ${esc(f.detected_format||'')} · ${esc(f.detected_source||'')} · ${f.record_count} records · ${esc(f.parse_status)}</div>`).join('')+
+    (d.warnings||[]).map(w=>`<div style="font-size:.8rem">⚠ ${esc(w)}</div>`).join('')+
+    `<div style="font-size:.8rem;color:var(--text-muted)">Detected services: ${esc((d.preview_stats.services||[]).join(', ')||'—')} · Range: ${esc(d.preview_stats.time_start||'')} → ${esc(d.preview_stats.time_end||'')}</div>`;
+  refreshAnalyses();
+}
+async function analyzeUpload(){
+  if(!UP_ANALYSIS) return;
+  const btn=document.getElementById('up-analyze-btn'); btn.disabled=true; btn.innerText='Analyzing…';
+  const r=await fetch('/api/logs/'+UP_ANALYSIS+'/analyze',{method:'POST'});
+  const d=await r.json();
+  btn.disabled=false; btn.innerText='Run RCA';
+  if(!r.ok){ alert(d.detail||'analysis failed'); return; }
+  const box=document.getElementById('up-results');
+  const repoHint=d.no_repo?'<div class="item-box">No repository connected. Connect a Git repository to enable code-level remediation.</div>':'';
+  box.innerHTML=`<div class="card"><div class="card-title">RCA Result — ${esc(d.incident_id)} <span class="pill info">Evidence Source: Uploaded Logs</span></div>
+    <div><strong>${esc(d.root_cause_category||'').toUpperCase()}</strong> ${Math.round((d.confidence||0)*100)}% — ${esc(d.root_cause||'')}</div>
+    <div style="font-size:.8rem;color:var(--text-muted)">Files: ${esc((d.files||[]).join(', '))} · Records: ${d.record_count} · Range: ${esc((d.time_range||[])[0]||'')} → ${esc((d.time_range||[])[1]||'')}</div>
+    <div style="margin-top:8px"><strong>Supporting</strong>${(d.supporting_evidence||[]).map(e=>`<div class="evidence-box">✔ ${esc(e)}</div>`).join('')}</div>
+    <div><strong>Contradictory</strong>${(d.contradictory_evidence||[]).map(e=>`<div class="evidence-box">✖ ${esc(e)}</div>`).join('')||'<p style="color:var(--text-muted)">None</p>'}</div>
+    <div><strong>Timeline</strong>${(d.timeline||[]).map(t=>`<div style="font-size:.78rem">${esc(t.timestamp)} [${esc(t.event_type)}] ${esc(t.description)}</div>`).join('')}</div>
+    ${repoHint}
+    <div style="margin-top:8px"><button class="sim-btn" onclick="openIncident('${esc(d.incident_id)}')">Open Incident</button></div></div>`;
+  refreshAnalyses();
+}
+async function refreshAnalyses(){
+  try{
+    const rows=await (await fetch('/api/log-analyses')).json();
+    document.getElementById('analyses-list').innerHTML=rows.length?rows.map(a=>`<div class="evidence-box"><strong>${esc(a.analysis_id)}</strong> ${esc(a.project_id)} · ${(a.files||[]).length} file(s) · ${a.record_count} records · ${esc(a.status)} <button class="sim-btn" onclick="openAnalysis('${esc(a.analysis_id)}')">Open</button></div>`).join(''):'<span style="color:var(--text-muted)">No log analyses yet.</span>';
+  }catch(e){}
+}
+async function openAnalysis(aid){
+  try{
+    const a=await (await fetch('/api/log-analyses/'+aid)).json();
+    const box=document.getElementById('analysis-detail');
+    box.innerHTML=`<div class="card"><div class="card-title">${esc(a.analysis_id)}</div>
+      <div style="font-size:.84rem">Project: ${esc(a.project_id)} · Source: ${esc(a.source_type)} · Services: ${esc((a.services||[]).join(', ')||'—')}<br/>Range: ${esc(a.time_start||'')} → ${esc(a.time_end||'')} · Records: ${a.record_count} · Errors: ${(a.error_codes||[]).join(', ')||'—'}</div>
+      ${a.rca&&a.rca.root_cause?`<div style="margin-top:8px"><strong>RCA:</strong> ${esc(a.rca.root_cause_category||'')} ${Math.round((a.rca.confidence||0)*100)}% — ${esc(a.rca.root_cause||'')}</div><div><strong>Supporting</strong>${(a.rca.supporting_evidence||[]).map(e=>`<div class="evidence-box">✔ ${esc(e)}</div>`).join('')}</div><div><strong>Contradictory</strong>${(a.rca.contradictory_evidence||[]).map(e=>`<div class="evidence-box">✖ ${esc(e)}</div>`).join('')||'<p style="color:var(--text-muted)">None</p>'}</div><div><strong>Timeline</strong>${(a.rca.timeline||[]).map(t=>`<div style="font-size:.78rem">${esc(t.timestamp)} [${esc(t.event_type)}] ${esc(t.description)}</div>`).join('')}</div>${a.rca.incident_id?`<div style="margin-top:6px"><button class="sim-btn" onclick="openIncident('${esc(a.rca.incident_id)}')">Open Incident</button></div>`:''}`:'<p style="color:var(--text-muted)">Not analyzed yet.</p>'}
+      </div>`;
+    box.scrollIntoView({behavior:'smooth'});
+  }catch(e){}
+}
+/* ---- settings ---- */
+async function loadSettings(){
+  const box=document.getElementById('settings-body'); if(!box) return;
+  try{
+    const h=await (await fetch('/health')).json();
+    const r=await (await fetch('/ready')).json();
+    box.innerHTML=`<div style="font-size:.85rem">Version: ${esc(h.version||'')} · Commit: ${esc(h.commit||'')} · Revision: ${esc(h.revision||'')}<br/>`+
+      Object.entries(r.checks||{}).map(([k,v])=>`${esc(k)}: ${v?'✓':'•'}`).join('<br/>')+`</div>
+      <div style="font-size:.8rem;color:var(--text-muted);margin-top:8px">Secrets are never displayed. Token presence only.</div>`;
+  }catch(e){ box.innerHTML='Unavailable.'; }
+  document.querySelectorAll('input[name="theme"]').forEach(el=>{ el.checked=(el.value===(localStorage.getItem('rca-theme')||'system')); });
+}
+
+setInterval(fetchLogs,3000); setInterval(tickFreshness,15000);
+window.addEventListener('hashchange',syncFromHash);
+window.onload=()=>{initTheme();initRouter();fetchLogs();loadTaxonomy();loadSideProjects();};
 </script>
 </body>
 </html>
@@ -618,7 +1498,7 @@ async def analyze_incident_api(incident_filename: str):
     return result.model_dump()
 
 
-# Phase 4: Health, approval, remediation, execution, verification, memory
+# Platform: health, approval, remediation, execution, verification, memory
 
 @app.get("/health")
 def health():
@@ -958,6 +1838,10 @@ async def run_live_rca(body: dict = None):
               ev.service_name)
     result = state.final_report.model_dump()
     result["timeline"] = [t.model_dump() for t in state.final_report.timeline]
+    # hypotheses + verdicts back the on-screen confidence explanation
+    result["hypotheses"] = [h.model_dump() for h in state.hypotheses]
+    result["validations"] = [v.model_dump() for v in
+                             state.validated_hypotheses + state.rejected_hypotheses]
     # add simulated logs hint
     result["live_logs_count"] = len(SIMULATED_LOGS)
     result["remediation_available"] = True
@@ -969,6 +1853,7 @@ async def run_live_rca(body: dict = None):
             if _h and _v.adjusted_confidence >= _best_conf:
                 _best_cat, _best_conf = _h.root_cause_category, _v.adjusted_confidence
     _best_cat = _best_cat or (state.hypotheses[0].root_cause_category if state.hypotheses else "unknown")
+    result["root_cause_category"] = _best_cat
     LAST_RCA[ev.incident_id] = {
         "root_cause_category": _best_cat,
         "root_cause": state.final_report.root_cause,
@@ -1080,7 +1965,7 @@ def _suggest_infra_params(evidence, action: str) -> dict:
 def _get_rca(incident_id: str) -> dict:
     rca = LAST_RCA.get(incident_id)
     if not rca:
-        raise HTTPException(status_code=400, detail=f"No validated RCA for {incident_id}: click 'Do RCA (Live)' first")
+        raise HTTPException(status_code=400, detail=f"No validated RCA for {incident_id}: click 'Run Live RCA' first")
     return rca
 
 
@@ -1099,7 +1984,7 @@ async def propose_remediation(incident_id: str):
     """
     entry = LAST_INVESTIGATION.get(incident_id)
     if not entry:
-        raise HTTPException(status_code=400, detail=f"No live investigation for {incident_id}: click 'Do RCA (Live)' first")
+        raise HTTPException(status_code=400, detail=f"No live investigation for {incident_id}: click 'Run Live RCA' first")
     state, cat = entry["state"], entry["category"]
     plan = await asyncio.to_thread(
         RemediationAgent().plan, state.incident_evidence, state.final_report, cat)
@@ -1773,9 +2658,12 @@ def home_stats():
 # ---------- pull requests ----------
 
 @app.get("/api/pull-requests")
-def list_prs(project: str = ""):
+def list_prs(project: str = "", incident: str = ""):
     from projects.store import PRRegistry
-    return [r.model_dump() for r in PRRegistry().list(project_id=project)]
+    rows = PRRegistry().list(project_id=project)
+    if incident:
+        rows = [r for r in rows if r.incident_id == incident]
+    return [r.model_dump() for r in rows]
 
 
 @app.get("/api/pull-requests/{pr_id}")
@@ -1795,7 +2683,7 @@ async def upload_logs(project_id: str = Form("unassigned"),
                       service: str = Form(""), incident_start: str = Form(""),
                       region: str = Form(""), environment: str = Form(""),
                       description: str = Form(""),
-                      files: list = File(...)):
+                      files: List[UploadFile] = File(...)):
     from ingestion.upload_handler import ingest_files
     from projects.store import AnalysisStore
     from schemas.project import LogAnalysis
@@ -1927,7 +2815,10 @@ async def analyze_upload(analysis_id: str):
                             "description": f"upload RCA {category} {state.final_report.confidence}"})
     result = dict(analysis.rca)
     result.update({"analysis_id": analysis_id,
-                   "files": [f["filename"] for f in analysis.files],
+                   "hypotheses": [h.model_dump() for h in state.hypotheses],
+                   "validations": [v.model_dump() for v in
+                                   state.validated_hypotheses + state.rejected_hypotheses],
+                   "files": [f.filename for f in analysis.files],
                    "record_count": stats["record_count"],
                    "time_range": [stats["time_start"], stats["time_end"]]})
     return result

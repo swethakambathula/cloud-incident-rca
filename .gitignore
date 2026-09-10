@@ -15,3 +15,12 @@ __pycache__/
 
 # Logs
 *.log
+
+# Runtime incident/platform stores (seeded automatically, never commit test data)
+data/uploads/
+data/activity.jsonl
+data/agent_prs.jsonl
+data/incidents.json
+data/log_analyses.jsonl
+data/projects.json
+data/audit.log

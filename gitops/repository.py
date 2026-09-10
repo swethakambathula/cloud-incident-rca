@@ -29,6 +29,15 @@ ALLOWED_COMMANDS = {
 }
 
 
+def is_repo_root(repo_path: str) -> bool:
+    """True only if the path itself is a git checkout (has .git).
+
+    Without this, `git -C <subdir>` silently walks up and operates on a
+    PARENT repository — e.g. branching the main project instead of the demo app.
+    """
+    return bool(repo_path) and os.path.isdir(os.path.join(repo_path, ".git"))
+
+
 def run_git(repo_path: str, args: List[str], check: bool = True) -> str:
     key = " ".join(args[:2]) if args[:1] == ["checkout"] and args[1:2] == ["-b"] else (args[0] if args else "")
     if key == "checkout" and len(args) > 1 and args[1] == "-b":
@@ -48,6 +57,10 @@ def run_git(repo_path: str, args: List[str], check: bool = True) -> str:
             raise PermissionError(f"Push refspec not allowlisted: {args}")
     if not any(repo_path == r or repo_path.startswith((r + os.sep,)) for r in allowed_repos() if r):
         raise PermissionError(f"Repository not approved for gitops: {repo_path}")
+    if not is_repo_root(repo_path):
+        raise PermissionError(
+            f"Not a git checkout: {repo_path}. Refusing to run git here so a parent "
+            f"repository is never touched. Publish/clone cloud-rca-demo-app first.")
     proc = subprocess.run(["git", "-C", repo_path] + args, capture_output=True,
                           text=True, timeout=120)
     if check and proc.returncode != 0:
@@ -96,8 +109,18 @@ def preflight(repo_path: str) -> dict:
         except Exception as e:
             return False, str(e)[:200]
 
-    ok, _ = _git(["rev-parse", "--git-dir"])
-    d["is_git_repo"] = ok
+    # Direct .git check: `git -C subdir` walks up into a parent repo and lies.
+    d["is_git_repo"] = bool(is_repo_root(repo_path))
+    if not d["is_git_repo"]:
+        d.update({"has_origin": False, "origin_url": "", "default_branch": "-",
+                  "git_identity": False, "current_branch": "?", "tree_clean": False,
+                  "ready_for_branch": False, "ready_for_pr": False,
+                  "gh_cli": _shutil.which("gh") is not None,
+                  "gh_token_present": bool(os.getenv("GH_TOKEN", ""))})
+        d["hint"] = ("DEMO_APP_PATH is not a git checkout (Cloud Run source deploy ships "
+                     "files without .git). Clone the demo repo with an origin remote, or run "
+                     "the dashboard locally where cloud-rca-demo-app/ is a git checkout.")
+        return checks
     ok, remote = _git(["remote", "get-url", "origin"])
     d["has_origin"] = ok
     d["origin_url"] = (remote[:60] + "...") if ok and len(remote) > 63 else (remote if ok else "")

@@ -2,12 +2,36 @@
 Infra remediation API tests: explicit propose -> suggested params -> approve ->
 execute & verify. Nothing is auto-created by RCA.
 """
+import os
+
+import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 
 
 def _client():
     return TestClient(app)
+
+
+@pytest.fixture()
+def demo_repo(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "cloud-rca-demo-app")
+    repo = str(tmp_path / "demo")
+    shutil.copytree(src, repo, ignore=shutil.ignore_patterns("__pycache__"))
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "rca@test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "rca-test"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init faulty"], cwd=repo, check=True, capture_output=True)
+    bare = str(tmp_path / "origin.git")
+    subprocess.run(["git", "init", "--bare", bare], check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", bare], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-u", "origin", "main"], cwd=repo, check=True, capture_output=True)
+    monkeypatch.setenv("DEMO_APP_PATH", repo)
+    return repo
 
 
 def _pending_for(c, incident_id):
@@ -18,8 +42,10 @@ def _pending_for(c, incident_id):
 def test_rca_creates_nothing_explicit_propose_creates_one():
     c = _client()
     c.post("/api/simulate/pool-exhaustion")
+    before = {a["approval_id"] for a in c.get("/api/approvals/pending").json()}
     iid = c.post("/api/rca/live").json()["incident_id"]
-    assert _pending_for(c, iid) == []
+    after = {a["approval_id"] for a in c.get("/api/approvals/pending").json()}
+    assert after - before == set(), "RCA must not auto-create approvals"
     assert c.post("/api/incidents/NOPE/remediation/propose").status_code == 400
 
     p = c.post(f"/api/incidents/{iid}/remediation/propose").json()
@@ -54,7 +80,7 @@ def test_scale_execute_and_verify():
     assert done["postmortem"]
 
 
-def test_rollback_revision_choices_and_selected_execute():
+def test_rollback_revision_choices_and_selected_execute(demo_repo):
     c = _client()
     c.post("/api/simulate/bad-deployment")
     iid = c.post("/api/rca/live").json()["incident_id"]
