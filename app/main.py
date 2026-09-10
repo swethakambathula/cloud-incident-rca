@@ -117,6 +117,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     
         :root{--background:#050505;--surface:#0d0d0d;--surface-secondary:#151515;--border:#2a2a2a;--text-primary:#ffffff;--text-secondary:#a6a6a6;--accent:#d9d9d9;--success:#3d9a50;--warning:#b98a2f;--danger:#c0564d;--terminal-background:#000000}
         #topnav{display:flex;gap:6px;align-items:center;padding:10px 16px;background:#0a0a0a;border-bottom:1px solid var(--border-color);position:sticky;top:0;z-index:50}
+        .view h1{font-size:1.5rem;margin:2px 0 6px;line-height:1.2}
+        #crumbs{margin:0 0 10px;min-height:1.2em}
+        #view-projects>div:first-child{flex-wrap:wrap;row-gap:8px}
+        .view{min-width:0}
         #topnav .brand{font-weight:700;margin-right:12px;white-space:nowrap}
         .nav-btn{padding:7px 12px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:.82rem;font-weight:600;cursor:pointer}
         .nav-btn:hover{background:#1c1c1c;color:#fff}
@@ -199,6 +203,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <button class="nav-btn" data-view="analyze" onclick="go('analyze')">Analyze</button>
   <button class="nav-btn" data-view="settings" onclick="go('settings')">Settings</button>
   <span style="flex:1"></span>
+  <span id="build-stamp" title="Deployed build" style="font-size:.68rem;color:var(--text-muted)"></span>
   <button class="nav-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle dark / light theme">◐ Theme</button>
 </nav>
 <div id="app">
@@ -897,10 +902,15 @@ function syncFromHash(){
   showView(routes[v]||'home', parts[1], parts[2]);
 }
 function showView(view, arg1, arg2){
-  document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
   const map={home:'view-home',projects:'view-projects',incidents:'view-incidents',prs:'view-prs',analyze:'view-analyze',settings:'view-settings'};
-  const el=document.getElementById(map[view]||'view-home');
-  if(el) el.classList.add('active');
+  const target=map[view]||'view-home';
+  // Belt and suspenders: classes AND inline display, so exactly one view
+  // is ever visible even if a stylesheet rule fails to apply.
+  document.querySelectorAll('.view').forEach(el=>{
+    const on=el.id===target;
+    el.classList.toggle('active',on);
+    el.style.display=on?'block':'none';
+  });
   document.querySelectorAll('#topnav .nav-btn[data-view]').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
   const names={home:'Home',projects:'Projects',incidents:'Incidents',prs:'Pull Requests',analyze:'Analyze Logs',settings:'Settings'};
   setCrumbs([['Home',()=>go('home')],[(names[view]||'Home'),null]]);
@@ -920,7 +930,13 @@ function setCrumbs(items){
     return `<a onclick="(${it[1].toString()})()">${esc(label)}</a>`;
   }).join(' / ');
 }
-function initRouter(){ syncFromHash(); }
+function initRouter(){
+  fetch('/health').then(r=>r.json()).then(h=>{
+    const el=document.getElementById('build-stamp');
+    if(el) el.innerText='build ' + String(h.commit||h.version||'local').slice(0,7);
+  }).catch(()=>{});
+  syncFromHash();
+}
 function toggleSidebar(){ document.getElementById('app').classList.toggle('collapsed'); }
 async function loadTaxonomy(){
   try{ TAX=await (await fetch('/api/taxonomy')).json(); }catch(e){ TAX=null; }
