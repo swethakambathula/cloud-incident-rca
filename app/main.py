@@ -246,7 +246,42 @@ function _historyCard(a){
   const when=String(a.decided_at||'').replace('T',' ').slice(0,19);
   const note=a.decided_message?`<div style="margin-top:4px;font-style:italic;color:var(--text-main)">Note: ${esc(a.decided_message)}</div>`:'';
   const by=a.decided_by?`<div>By ${esc(a.decided_by)} at ${esc(when)}</div>`:'';
-  return `<div style="padding:6px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:6px;margin-bottom:6px;font-size:.76rem;color:var(--text-muted)"><span style="color:${color};font-weight:700">${esc(st)}</span> <strong style="color:var(--text-main)">${esc(a.action)}</strong> ${esc(a.incident_id)}<br/>Risk ${esc(a.risk)}${by}${note}</div>`;
+  const execBtn=(st==='APPROVED'&&['cloud_run_rollback','cloud_run_shift_traffic','cloud_run_scale_within_limits'].includes(a.action))
+    ? `<div style="margin-top:6px"><button onclick="executeInfra('${a.approval_id}','${esc(a.action)}')" style="padding:2px 8px;border-radius:4px;background:var(--accent-purple);border:none;color:#fff;cursor:pointer">Execute &amp; Verify</button></div><div id="exec-${a.approval_id}" style="margin-top:6px"></div>`:'';
+  return `<div style="padding:6px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:6px;margin-bottom:6px;font-size:.76rem;color:var(--text-muted)"><span style="color:${color};font-weight:700">${esc(st)}</span> <strong style="color:var(--text-main)">${esc(a.action)}</strong> ${esc(a.incident_id)}<br/>Risk ${esc(a.risk)}${by}${note}${execBtn}</div>`;
+}
+async function executeInfra(id, action){
+  const box=document.getElementById('exec-'+id);
+  const show=t=>{ if(box) box.innerHTML=t; };
+  show('<span style="color:var(--text-muted)">Loading suggested parameters…</span>');
+  let params={};
+  try{ params=(await (await fetch('/api/approvals/'+id+'/params')).json()).params||{}; }catch(e){}
+  if(action==='cloud_run_rollback'&&!params.target_revision){
+    const v=prompt('Target revision to roll back to (previous known-good revision):', '');
+    if(v===null) return; params.target_revision=(v||'').trim();
+    if(!params.target_revision){ show('Target revision is required.'); return; }
+  }
+  if(action==='cloud_run_shift_traffic'&&!params.revision_percentages){
+    const v=prompt('Traffic split JSON (must total 100), e.g. {"rev-a":100}:', '');
+    if(v===null) return;
+    try{ params.revision_percentages=JSON.parse(v); }catch(e){ show('Invalid JSON.'); return; }
+  }
+  if(action==='cloud_run_scale_within_limits'&&params.max_instances==null){
+    const v=prompt('max_instances (bounded by MAX_SCALE_LIMIT):', '10');
+    if(v===null) return; params.max_instances=parseInt(v,10);
+  }
+  if(!confirm('Execute '+action+' with '+JSON.stringify(params)+'?')) return;
+  show('<span style="color:var(--text-muted)">Executing…</span>');
+  const r=await fetch('/api/approvals/'+id+'/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params)});
+  const d=await r.json();
+  if(!r.ok){ show('<span style="color:var(--accent-red)">Execute failed: '+esc(d.detail||r.status)+'</span>'); return; }
+  const ex=d.execution||{}, vf=d.verification||{};
+  show(`<div><strong>Execution:</strong> <span style="color:var(--accent-green)">${esc(ex.status||'')}</span> ${esc(ex.cloud_operation_id||'')}</div>`+
+    `<div><strong>Before:</strong> ${esc(JSON.stringify(ex.before_state||{}))}</div>`+
+    `<div><strong>After:</strong> ${esc(JSON.stringify(ex.after_state||{}))}</div>`+
+    `<div><strong>Verification:</strong> ${esc(vf.verification_status||'')} — ${esc(vf.summary||'')}</div>`+
+    `<div>Error ${vf.error_rate_before}% → ${vf.error_rate_after}%, latency ${vf.latency_before}ms → ${vf.latency_after}ms</div>`);
+  fetchLogs();
 }
 async function fetchLogs(){
   if(_pollInFlight) return;  // never stack overlapping polls — this was freezing the page
@@ -811,6 +846,30 @@ from schemas.code_fix import FixJob, FixStatus
 FIX_JOBS = {}  # incident_id -> {"job": FixJob, "proposal": PatchProposal|None, "approval_id": str|None}
 LAST_RCA = {}  # incident_id -> validated RCA summary for code mapping
 LAST_INVESTIGATION = {}  # incident_id -> {"state": InvestigationState, "category": str} (bounded, for explicit remediation proposals)
+APPROVAL_PARAMS = {}  # approval_id -> suggested executor params (rollback target, scale bounds)
+
+
+def _suggest_infra_params(evidence, action: str) -> dict:
+    """Derive executor params from investigation evidence so Execute is one click.
+
+    Rollback target = newest revision that is not the incident's active one.
+    Scale default stays within MAX_SCALE_LIMIT. Shift-traffic needs human JSON.
+    """
+    if action == "cloud_run_rollback":
+        revs = [d.get("revision_name") for d in (evidence.recent_deployments or [])
+                if isinstance(d, dict) and d.get("revision_name")]
+        target = next((r for r in revs if r != evidence.revision_name), None)
+        if target is None and len(revs) > 1:
+            target = revs[1]
+        return {"target_revision": target} if target else {}
+    if action == "cloud_run_scale_within_limits":
+        import os as _os
+        try:
+            limit = int(_os.getenv("MAX_SCALE_LIMIT", "20"))
+        except ValueError:
+            limit = 20
+        return {"max_instances": min(10, limit)}
+    return {}
 
 
 def _get_rca(incident_id: str) -> dict:
@@ -844,9 +903,21 @@ async def propose_remediation(incident_id: str):
         rationale=plan.expected_effect, root_cause=plan.root_cause, confidence=plan.confidence, risk=plan.estimated_risk.value,
         expected_impact=plan.expected_effect, rollback_plan=plan.rollback_plan
     )
+    APPROVAL_PARAMS[approval.approval_id] = _suggest_infra_params(state.incident_evidence, plan.recommended_action)
     audit_log("REMEDIATION_PLANNED", incident_id, "web-user", plan.recommended_action,
               approval.target_resource, approval_id=approval.approval_id)
-    return {"remediation_plan": plan.model_dump(), "approval": approval.model_dump()}
+    return {"remediation_plan": plan.model_dump(), "approval": approval.model_dump(),
+            "suggested_params": APPROVAL_PARAMS[approval.approval_id]}
+
+
+@app.get("/api/approvals/{approval_id}/params")
+def approval_params(approval_id: str):
+    """Suggested executor params for an approval (empty when human input needed)."""
+    req = global_approval_manager.get(approval_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return {"approval_id": approval_id, "action": req.action,
+            "status": req.status.value, "params": APPROVAL_PARAMS.get(approval_id, {})}
 
 
 @app.post("/api/incidents/{incident_id}/analyze-code")
