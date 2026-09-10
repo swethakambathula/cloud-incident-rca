@@ -5,8 +5,8 @@ Serves a modern, dark-mode visual RCA dashboard for Phase 1 & 2 incidents.
 import os
 import glob
 import json
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 import uvicorn
 
 from agents.rca_agent.agent import CloudRCAAgent
@@ -74,12 +74,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <title>Google Cloud Incident Investigation & RCA Agent</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        :root { --bg-dark:#0b1329; --card-bg:#151e36; --accent-cyan:#06b6d4; --accent-purple:#8b5cf6; --accent-red:#ef4444; --accent-green:#10b981; --accent-yellow:#f59e0b; --text-main:#f8fafc; --text-muted:#94a3b8; --border-color:#223055; }
+        :root { --bg-dark:#050505; --card-bg:#0d0d0d; --surface:#151515; --accent-cyan:#d9d9d9; --accent-purple:#8a8a8a; --accent-red:#f0f0f0; --accent-green:#ffffff; --accent-yellow:#b5b5b5; --text-main:#ffffff; --text-muted:#a6a6a6; --text-faint:#6f6f6f; --border-color:#2a2a2a; --hover:#1c1c1c; --selected:#262626; }
         *{box-sizing:border-box;margin:0;padding:0} body{font-family:'Inter',sans-serif;background:var(--bg-dark);color:var(--text-main);display:flex;min-height:100vh}
-        .sidebar{width:320px;background:#080d1c;border-right:1px solid var(--border-color);padding:24px;display:flex;flex-direction:column;gap:16px;overflow-y:auto}
+        .sidebar{width:320px;background:#0a0a0a;border-right:1px solid var(--border-color);padding:24px;display:flex;flex-direction:column;gap:16px;overflow-y:auto}
         .sidebar h2{font-size:1.15rem;color:var(--accent-cyan)}
         .incident-card{background:var(--card-bg);border:1px solid var(--border-color);padding:12px 14px;border-radius:8px;cursor:pointer;transition:.2s}
-        .incident-card:hover,.incident-card.active{border-color:var(--accent-cyan);transform:translateY(-2px);box-shadow:0 4px 14px rgba(6,182,212,.2)}
+        .incident-card:hover,.incident-card.active{border-color:var(--accent-cyan);transform:translateY(-2px);box-shadow:0 4px 14px rgba(255,255,255,.08)}
         .incident-card h4{font-size:.88rem;margin-bottom:4px} .incident-card p{font-size:.75rem;color:var(--text-muted)}
         .main-content{flex:1;min-width:0;padding:24px 32px;overflow-y:auto;overflow-x:hidden}
         .card,.item-box,.evidence-box,.log-panel{min-width:0;overflow-wrap:anywhere}
@@ -93,25 +93,26 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             .log-panel{height:200px}
         }
         .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border-color);flex-wrap:wrap;gap:12px}
-        .btn{background:linear-gradient(135deg,var(--accent-cyan),var(--accent-purple));color:#fff;border:none;padding:10px 18px;border-radius:6px;font-weight:600;cursor:pointer}
-        .btn:disabled{opacity:.5;cursor:not-allowed} .btn-red{background:linear-gradient(135deg,#ef4444,#dc2626)} .btn-green{background:linear-gradient(135deg,#10b981,#059669)}
+        .btn{background:linear-gradient(180deg,#2e2e2e,#101010);color:#fff;border:1px solid #3a3a3a;padding:10px 18px;border-radius:6px;font-weight:600;cursor:pointer}
+        .btn:disabled{opacity:.5;cursor:not-allowed} .btn-red{background:linear-gradient(180deg,#2e2e2e,#101010);border:1px solid #4a4a4a} .btn-green{background:linear-gradient(180deg,#3d3d3d,#161616);border:1px solid #6a6a6a}
         .sim-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;padding:14px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:10px;align-items:center}
         .sim-bar strong{font-size:.85rem;color:var(--accent-cyan);margin-right:4px}
-        .sim-btn{padding:7px 12px;border-radius:6px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem;font-weight:600;cursor:pointer}
-        .sim-btn:hover{border-color:var(--accent-cyan);background:#1e2a4a}
-        .log-panel{background:#020617;border:1px solid var(--border-color);border-radius:8px;padding:12px;height:260px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.5}
-        .log-line{padding:2px 0;border-bottom:1px solid rgba(34,48,85,.3)} .log-error{color:var(--accent-red)} .log-warn{color:var(--accent-yellow)} .log-info{color:var(--text-muted)}
+        .sim-btn{padding:7px 12px;border-radius:6px;border:1px solid var(--border-color);background:#101010;color:var(--text-main);font-size:.78rem;font-weight:600;cursor:pointer}
+        .sim-btn:hover{border-color:#d9d9d9;background:#1c1c1c}
+        .log-panel{background:#000000;border:1px solid var(--border-color);border-radius:8px;padding:12px;height:260px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.5}
+        .log-line{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.07)} .log-error{color:#ffffff;font-weight:700} .log-warn{color:#b5b5b5;font-weight:600} .log-info{color:var(--text-muted)}
         .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:20px;margin-bottom:20px}
         .card{background:var(--card-bg);border:1px solid var(--border-color);border-radius:10px;padding:20px;box-shadow:0 8px 20px rgba(0,0,0,.3)}
         .card-title{font-size:1.05rem;font-weight:600;margin-bottom:14px;color:var(--accent-cyan)}
         .badge{display:inline-block;padding:4px 10px;border-radius:20px;font-size:.75rem;font-weight:600;text-transform:uppercase}
-        .badge-red{background:rgba(239,68,68,.2);color:var(--accent-red);border:1px solid var(--accent-red)}
-        .badge-yellow{background:rgba(245,158,11,.2);color:var(--accent-yellow);border:1px solid var(--accent-yellow)}
-        .badge-green{background:rgba(16,185,129,.2);color:var(--accent-green);border:1px solid var(--accent-green)}
-        .item-box{background:#0b1329;border-left:4px solid var(--accent-cyan);padding:10px 14px;margin-bottom:8px;border-radius:0 6px 6px 0;font-size:.88rem}
-        .evidence-box{background:#0b1329;border:1px solid var(--border-color);padding:10px 14px;border-radius:6px;margin-bottom:8px;font-size:.85rem}
-        .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px} .dot-green{background:var(--accent-green);box-shadow:0 0 6px var(--accent-green)} .dot-red{background:var(--accent-red);animation:pulse 1.2s infinite}
+        .badge-red{background:#1a1a1a;color:#ffffff;border:2px solid #8a8a8a}
+        .badge-yellow{background:#141414;color:#b5b5b5;border:1px solid #4a4a4a}
+        .badge-green{background:#1a1a1a;color:#ffffff;border:1px solid #8a8a8a}
+        .item-box{background:#101010;border-left:4px solid var(--accent-cyan);padding:10px 14px;margin-bottom:8px;border-radius:0 6px 6px 0;font-size:.88rem}
+        .evidence-box{background:#101010;border:1px solid var(--border-color);padding:10px 14px;border-radius:6px;margin-bottom:8px;font-size:.85rem}
+        .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px} .dot-green{background:#ffffff;box-shadow:0 0 6px rgba(255,255,255,.6)} .dot-red{background:#9a9a9a;animation:pulse 1.2s infinite}
         @keyframes pulse{0%{opacity:1}50%{opacity:.4}100%{opacity:1}}
+            button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #d9d9d9;outline-offset:1px}
     </style>
 </head>
 <body>
@@ -151,13 +152,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="card-title">📡 Live Logs <span style="font-size:.75rem;color:var(--text-muted);font-weight:400">— auto-refresh every 3s, click Simulate to inject</span>
                     <button class="sim-btn" id="pause-btn" onclick="togglePause()" style="margin-left:auto">Pause</button>
                 </div>
-                <div id="log-summary" style="display:flex;flex-wrap:wrap;gap:14px;font-size:.78rem;color:var(--text-muted);margin-bottom:8px;padding:8px 10px;background:#020617;border:1px solid var(--border-color);border-radius:6px">No data yet — simulate an incident.</div>
+                <div id="log-summary" style="display:flex;flex-wrap:wrap;gap:14px;font-size:.78rem;color:var(--text-muted);margin-bottom:8px;padding:8px 10px;background:#000000;border:1px solid var(--border-color);border-radius:6px">No data yet — simulate an incident.</div>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;font-size:.78rem">
-                    <select id="f-service" onchange="renderLogs()" style="background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All services</option></select>
-                    <select id="f-severity" onchange="renderLogs()" style="background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All severities</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select>
-                    <select id="f-error" onchange="renderLogs()" style="background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px;max-width:220px"><option value="">All error types</option></select>
-                    <input id="f-trace" oninput="renderLogs()" placeholder="trace id…" style="background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem;width:150px" />
-                    <input id="f-search" oninput="renderLogs()" placeholder="search logs…" style="flex:1;min-width:140px;background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem" />
+                    <select id="f-service" onchange="renderLogs()" style="background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All services</option></select>
+                    <select id="f-severity" onchange="renderLogs()" style="background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All severities</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select>
+                    <select id="f-error" onchange="renderLogs()" style="background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px;max-width:220px"><option value="">All error types</option></select>
+                    <input id="f-trace" oninput="renderLogs()" placeholder="trace id…" style="background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem;width:150px" />
+                    <input id="f-search" oninput="renderLogs()" placeholder="search logs…" style="flex:1;min-width:140px;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem" />
                 </div>
                 <div id="live-logs" class="log-panel">Waiting for simulated errors... Click any 🧪 button above.</div>
             </div>
@@ -187,14 +188,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div id="cf-investigation" style="margin-bottom:12px"></div>
                     <div id="cf-diff-wrap" style="display:none;margin-bottom:12px">
                         <div style="font-size:.85rem;color:var(--text-muted);margin-bottom:6px"><strong>Inline diff</strong> <span id="cf-files" style="margin-left:8px"></span></div>
-                        <pre id="cf-diff" style="background:#020617;border:1px solid var(--border-color);border-radius:6px;padding:12px;overflow-x:auto;font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.5;white-space:pre-wrap"></pre>
+                        <pre id="cf-diff" style="background:#000000;border:1px solid var(--border-color);border-radius:6px;padding:12px;overflow-x:auto;font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.5;white-space:pre-wrap"></pre>
                         <div id="cf-meta" style="font-size:.8rem;color:var(--text-muted);margin-top:8px"></div>
                     </div>
                     <div id="cf-no-fix" style="display:none" class="item-box"></div>
                     <div id="cf-preflight" style="font-size:.76rem;color:var(--text-muted);margin:8px 0"></div>
                     <div id="cf-lifecycle" style="font-size:.8rem;color:var(--text-muted);margin:8px 0"></div>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
-                        <input id="cf-msg" placeholder="approval note (optional)…" style="flex:1;min-width:180px;background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:7px 10px;font-size:.8rem" />
+                        <input id="cf-msg" placeholder="approval note (optional)…" style="flex:1;min-width:180px;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:7px 10px;font-size:.8rem" />
                         <button class="btn btn-green" id="cf-approve-btn" onclick="approveFixPR()">Approve &amp; Create PR</button>
                         <button class="btn btn-red" onclick="rejectFix()">Reject</button>
                         <button class="sim-btn" onclick="generateFix(true)">Generate Fix</button>
@@ -247,7 +248,7 @@ let _pollInFlight=false, _lastLogSig='', _lastApprSig='';
 function _approvalCard(a, accent){
   const border=accent?'var(--accent-cyan)':'var(--border-color)';
   const pad=accent?'4px 10px':'2px 8px';
-  return `<div style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#0b1329;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:${pad};border-radius:4px;background:var(--accent-green);border:none;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:${pad};border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Reject</button></div></div>`;
+  return `<div style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#101010;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:${pad};border-radius:4px;background:linear-gradient(180deg,#3d3d3d,#161616);border:1px solid #6f6f6f;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:${pad};border-radius:4px;background:linear-gradient(180deg,#232323,#0d0d0d);border:1px solid #4a4a4a;color:#fff;cursor:pointer">Reject</button></div></div>`;
 }
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function _historyCard(a){
@@ -257,7 +258,7 @@ function _historyCard(a){
   const note=a.decided_message?`<div style="margin-top:4px;font-style:italic;color:var(--text-main)">Note: ${esc(a.decided_message)}</div>`:'';
   const by=a.decided_by?`<div>By ${esc(a.decided_by)} at ${esc(when)}</div>`:'';
   const execBtn=(st==='APPROVED'&&['cloud_run_rollback','cloud_run_shift_traffic','cloud_run_scale_within_limits'].includes(a.action))
-    ? `<div style="margin-top:6px"><button onclick="executeInfra('${a.approval_id}','${esc(a.action)}')" style="padding:2px 8px;border-radius:4px;background:var(--accent-purple);border:none;color:#fff;cursor:pointer">Execute &amp; Verify</button></div><div id="exec-${a.approval_id}" style="margin-top:6px"></div>`:'';
+    ? `<div style="margin-top:6px"><button onclick="executeInfra('${a.approval_id}','${esc(a.action)}')" style="padding:2px 8px;border-radius:4px;background:linear-gradient(180deg,#2e2e2e,#101010);border:1px solid #555555;color:#fff;cursor:pointer">Execute &amp; Verify</button></div><div id="exec-${a.approval_id}" style="margin-top:6px"></div>`:'';
   return `<div style="padding:6px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:6px;margin-bottom:6px;font-size:.76rem;color:var(--text-muted)"><span style="color:${color};font-weight:700">${esc(st)}</span> <strong style="color:var(--text-main)">${esc(a.action)}</strong> ${esc(a.incident_id)}<br/>Risk ${esc(a.risk)}${by}${note}${execBtn}</div>`;
 }
 async function executeInfra(id, action){
@@ -277,10 +278,10 @@ async function executeInfra(id, action){
     if(!opts.length){ show('No previous revisions found in incident evidence.'); return; }
     const selId='rollback-sel-'+id;
     show(`<div style="margin-bottom:6px">Roll back <strong>${esc(current||'current')}</strong> to:</div>`+
-      `<select id="${selId}" style="width:100%;background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:6px 8px;font-size:.78rem">`+
+      `<select id="${selId}" style="width:100%;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:6px 8px;font-size:.78rem">`+
       opts.map(r=>`<option value="${esc(r.revision_name)}"${r.revision_name===suggested?' selected':''}>${esc(r.revision_name)}${r.deployed_at?' — '+esc(r.deployed_at):''}${r.traffic_percent!==''?' — '+esc(String(r.traffic_percent))+'% traffic':''}</option>`).join('')+
       `</select><div style="color:var(--text-muted)">Suggested: ${esc(suggested||opts[0].revision_name)} (newest non-current; current revision disabled)</div>`+
-      `<div style="margin-top:6px"><button onclick="doExecuteInfra('${id}','${action}',{target_revision:document.getElementById('${selId}').value})" style="padding:2px 10px;border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Run Rollback</button></div>`);
+      `<div style="margin-top:6px"><button onclick="doExecuteInfra('${id}','${action}',{target_revision:document.getElementById('${selId}').value})" style="padding:2px 10px;border-radius:4px;background:linear-gradient(180deg,#232323,#0d0d0d);border:1px solid #4a4a4a;color:#fff;cursor:pointer">Run Rollback</button></div>`);
     return;
   }
   if(action==='cloud_run_shift_traffic'&&!params.revision_percentages){
@@ -459,7 +460,7 @@ async function proposeRemediation(){
   const d=await r.json();
   if(!r.ok){ rb.innerHTML='<span style="color:var(--accent-red)">'+esc(d.detail||'proposal failed')+'</span>'; return; }
   const p=d.remediation_plan, a=d.approval;
-  rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#020617"><strong>Proposed:</strong> ${esc(p.recommended_action)} (${esc(p.mitigation_type)}) Risk ${esc(p.estimated_risk)}<br/><strong>Effect:</strong> ${esc(p.expected_effect)}<br/><strong>Rollback:</strong> ${esc(p.rollback_plan)}<br/><strong>Approval:</strong> ${esc(a.approval_id)} <em>${esc(a.status)}</em> — decide in Phase 4 Approval (sidebar).</div>`;
+  rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#000000"><strong>Proposed:</strong> ${esc(p.recommended_action)} (${esc(p.mitigation_type)}) Risk ${esc(p.estimated_risk)}<br/><strong>Effect:</strong> ${esc(p.expected_effect)}<br/><strong>Rollback:</strong> ${esc(p.rollback_plan)}<br/><strong>Approval:</strong> ${esc(a.approval_id)} <em>${esc(a.status)}</em> — decide in Phase 4 Approval (sidebar).</div>`;
   fetchLogs();
 }
 function renderRCA(data){
@@ -478,7 +479,7 @@ function renderRCA(data){
   document.getElementById('evidence-list').innerHTML=(data.evidence||data.supporting_evidence||[]).map(e=>`<div class="evidence-box"><span style="color:var(--accent-green)">✔</span> ${e}</div>`).join('');
   document.getElementById('contra-list').innerHTML=(data.contradictory_evidence||[]).map(c=>`<div class="evidence-box"><span style="color:var(--accent-red)">✖</span> ${c}</div>`).join('')||'<p style="color:var(--text-muted);font-size:.85rem">None</p>';
   const rb=document.getElementById('remediation-box');
-  if(data.remediation_plan||data.approval){ const p=data.remediation_plan||data; const a=data.approval; rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#020617"><strong>Remediation:</strong> ${p.recommended_action||p.action} (${p.mitigation_type||''}) Risk ${p.estimated_risk||p.risk}<br/><strong>Rollback:</strong> ${p.rollback_plan||''}<br/>${a?`<strong>Approval:</strong> ${a.approval_id} <em>${a.status}</em>`:''}</div>`; }
+  if(data.remediation_plan||data.approval){ const p=data.remediation_plan||data; const a=data.approval; rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#000000"><strong>Remediation:</strong> ${p.recommended_action||p.action} (${p.mitigation_type||''}) Risk ${p.estimated_risk||p.risk}<br/><strong>Rollback:</strong> ${p.rollback_plan||''}<br/>${a?`<strong>Approval:</strong> ${a.approval_id} <em>${a.status}</em>`:''}</div>`; }
   else if(data.remediation_available){ rb.innerHTML=`<button class="sim-btn" onclick="proposeRemediation()">Propose Remediation Plan</button><div style="font-size:.78rem;color:var(--text-muted);margin-top:6px">Creates one infra approval (human-gated). Nothing runs automatically.</div>`; }
   else { rb.innerHTML='';}
   out.scrollIntoView({behavior:'smooth'});
@@ -571,7 +572,7 @@ async function refreshFixStatus(){
   else if(job.branch){ pr.innerHTML=`<div class="item-box"><strong>Branch:</strong> ${esc(job.branch)}${job.commit?(' · <strong>Commit:</strong> '+esc(job.commit)):''}</div>`; }
   else{ pr.innerHTML=''; }
   const t=document.getElementById('cf-tests');
-  if(job.test_output){ t.innerHTML='<strong>Test Results:</strong><pre style="background:#020617;border:1px solid var(--border-color);border-radius:6px;padding:10px;max-height:220px;overflow:auto;font-size:.75rem;white-space:pre-wrap">'+esc(job.test_output.slice(-2000))+'</pre>'; }
+  if(job.test_output){ t.innerHTML='<strong>Test Results:</strong><pre style="background:#000000;border:1px solid var(--border-color);border-radius:6px;padding:10px;max-height:220px;overflow:auto;font-size:.75rem;white-space:pre-wrap">'+esc(job.test_output.slice(-2000))+'</pre>'; }
 }
 setInterval(fetchLogs,3000); window.onload=()=>{loadIncidents();fetchLogs();};
 </script>
@@ -599,8 +600,21 @@ async def analyze_incident_api(incident_filename: str):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Incident file not found")
 
+    import time as _time
     agent = CloudRCAAgent()
+    _started = _time.time()
     result = await asyncio.to_thread(agent.analyze, file_path)
+    try:
+        _registry().ensure(result.incident_id, title=f"Static RCA {incident_filename}",
+                           services=list(result.affected_services),
+                           evidence_source="static")
+        for _t in ("COLLECTING_EVIDENCE", "ANALYZING", "ROOT_CAUSE_IDENTIFIED"):
+            _bump(result.incident_id, _t, "web-user")
+        _registry().add_rca_run(result.incident_id, {
+            "category": result.root_cause_category, "confidence": result.confidence_score,
+            "duration_s": round(_time.time() - _started, 1), "evidence_source": "static"})
+    except Exception:
+        pass
     return result.model_dump()
 
 
@@ -687,6 +701,16 @@ def approve_request(approval_id: str, approver: str = "human-operator", body: di
     if not req:
         raise HTTPException(status_code=404, detail="Approval not found")
     audit_log("APPROVAL_APPROVED", req.incident_id, approver, req.action, req.target_resource, approval_id=approval_id, result=msg)
+    try:
+        from orchestration.incident_registry import record_activity
+        from orchestration.notifications import notify
+        _bump(req.incident_id, "APPROVED", approver)
+        record_activity("APPROVAL_APPROVED", req.incident_id, approver,
+                        f"{req.action} approved", {"approval_id": approval_id})
+        notify("APPROVAL_DECIDED", {"incident_id": req.incident_id, "target": req.action,
+                                    "description": f"approved {req.action}"})
+    except Exception:
+        pass
     return req.model_dump()
 
 @app.post("/approvals/{approval_id}/reject")
@@ -699,6 +723,16 @@ def reject_request(approval_id: str, approver: str = "human-operator", body: dic
     if not req:
         raise HTTPException(status_code=404, detail="Approval not found")
     audit_log("APPROVAL_REJECTED", req.incident_id, approver, req.action, req.target_resource, approval_id=approval_id, result=msg)
+    try:
+        from orchestration.incident_registry import record_activity
+        from orchestration.notifications import notify
+        _bump(req.incident_id, "REMEDIATION_PROPOSED", approver)
+        record_activity("APPROVAL_REJECTED", req.incident_id, approver,
+                        f"{req.action} rejected: {msg}", {"approval_id": approval_id})
+        notify("APPROVAL_DECIDED", {"incident_id": req.incident_id, "target": req.action,
+                                    "description": f"rejected {req.action}"})
+    except Exception:
+        pass
     return req.model_dump()
 
 @app.post("/approvals/{approval_id}/cancel")
@@ -719,6 +753,14 @@ async def execute_approval(approval_id: str, action_params: dict = None):
         raise HTTPException(status_code=404, detail="Approval not found")
     # Cloud API calls run in a thread so the event loop stays free
     result, verification, postmortem = await asyncio.to_thread(_execute_and_verify, req, action_params)
+    try:
+        from orchestration.incident_registry import record_activity
+        if result.status.value == "SUCCESS" and verification.verification_status.value == "RESOLVED":
+            _bump(req.incident_id, "RESOLVED", "verification-agent")
+            record_activity("INCIDENT_RESOLVED", req.incident_id, "verification-agent",
+                            "infra remediation verified", {})
+    except Exception:
+        pass
     return {"execution": result.model_dump(), "verification": verification.model_dump(), "postmortem": postmortem}
 
 # --- Live simulation + logs (for website button demo) ---
@@ -814,23 +856,74 @@ def simulate_error(scenario: str):
         except Exception:
             pass
     audit_log("SIMULATE", incident_file or scenario, "web-user", spec["error_code"], spec["service"])
+    try:
+        from orchestration.incident_registry import record_activity
+        from tools.error_taxonomy import LABELS
+        sev = {"CRITICAL": "P1", "ERROR": "P1"}.get(spec["severity"], "P2")
+        _registry().ensure(incident_id, project_id=_projects().resolve_project(spec["service"]),
+                           title=f"{LABELS.get(scenario, scenario)} on {spec['service']}",
+                           severity=sev, services=[spec["service"]], evidence_source="live")
+        _bump(incident_id, "COLLECTING_EVIDENCE", "web-user")
+        record_activity("SIMULATION_STARTED", incident_id, "web-user",
+                        f"simulated {scenario}", {"scenario": scenario})
+    except Exception:
+        pass
     return {"simulated": True, "scenario": scenario, "incident_id": incident_id,
             "incident_file": incident_file, "logs_injected": len(new_logs),
             "bucket": bucket or "local", "summary": summarize(new_logs)}
 
+MANUAL_EVIDENCE = {}  # incident_id -> manual-create inputs for RCA
+
+
+def _manual_evidence(incident_id: str, inputs: dict):
+    """Evidence for a manually created incident (no simulation needed)."""
+    from datetime import datetime, timedelta, timezone as _tz
+    from tools.normalizer import normalize_evidence
+    start = inputs.get("start_time") or datetime.now(_tz.utc).isoformat()
+    try:
+        end = (datetime.fromisoformat(start.replace("Z", "+00:00")) + timedelta(minutes=15)).isoformat()
+    except ValueError:
+        end = start
+    service = (inputs.get("services") or ["unknown-service"])[0]
+    desc = inputs.get("description", "") or inputs.get("title", "")
+    code = inputs.get("error_signature", "") or "MANUAL_INCIDENT"
+    raw_logs = [{
+        "timestamp": start, "severity": "ERROR",
+        "payload": {"error_code": code, "message": desc, "endpoint": "/"},
+        "http_request": {"status": 500, "request_url": "/"},
+        "trace_id": inputs.get("trace_id") or None,
+    }]
+    deployments = []
+    if inputs.get("revision"):
+        deployments = [{"revision_name": inputs["revision"], "deployed_at": start,
+                        "traffic_percent": 100}]
+    traces = [{"trace_id": inputs["trace_id"]}] if inputs.get("trace_id") else []
+    return normalize_evidence(
+        incident_id=incident_id, project_id=inputs.get("project_id", "manual"),
+        service_name=service, start_time=start, end_time=end, raw_logs=raw_logs,
+        raw_metrics={}, deployment_events=deployments, raw_traces=traces,
+        dependencies=[], revision_name=inputs.get("revision") or None, region="")
+
+
 @app.post("/api/rca/live")
-async def run_live_rca():
+async def run_live_rca(body: dict = None):
     # Fresh investigation from the LIVE log stream (Part 4). Static files only
     # supply deployments/traces/dependencies; counts, rates and latencies come
     # from the actual streamed logs. Scenarios without static files are built
-    # purely from live evidence.
+    # purely from live evidence. A manual incident_id runs from stored inputs.
+    import time as _time
     from schemas.evidence import IncidentEvidence
     from tools.live_evidence import merge_static_with_live, build_evidence_from_logs
-    scenario = LATEST_SCENARIO
-    incident_file = LATEST_SIMULATED_FILE
+    from tools.error_taxonomy import domain_for_category, domain_for_scenario
+    from orchestration.incident_registry import record_activity
+    manual_id = (body or {}).get("incident_id") if isinstance(body, dict) else None
+    scenario, incident_file, evidence_source = LATEST_SCENARIO, LATEST_SIMULATED_FILE, "live"
     live_logs = [l for l in SIMULATED_LOGS
                  if not scenario or l.get("scenario") == scenario] or SIMULATED_LOGS
-    if incident_file:
+    if manual_id and manual_id in MANUAL_EVIDENCE:
+        ev = _manual_evidence(manual_id, MANUAL_EVIDENCE[manual_id])
+        live_logs, evidence_source = [], "manual"
+    elif incident_file:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         file_path = os.path.join(base_dir, "data", "incidents", incident_file)
         if not os.path.exists(file_path):
@@ -846,8 +939,21 @@ async def run_live_rca():
     # Heavy workflow in a thread — polls and clicks keep working while it runs.
     # NOTE: RCA creates NOTHING else here. Remediation/code-fix proposals are
     # explicit user actions (Propose Remediation / Generate Fix buttons).
+    try:
+        _registry().ensure(ev.incident_id, project_id=_projects().resolve_project(ev.service_name),
+                           title=f"Live RCA on {ev.service_name}", severity=ev.severity,
+                           services=[ev.service_name], evidence_source=evidence_source)
+        for _t in ("COLLECTING_EVIDENCE", "ANALYZING"):
+            _bump(ev.incident_id, _t, "web-user")
+        from orchestration.incident_registry import record_activity
+        record_activity("RCA_STARTED", ev.incident_id, "web-user", "live RCA started", {})
+    except Exception:
+        pass
+    import time as _time
+    _started = _time.time()
     wf = InvestigationWorkflow()
     state = await asyncio.to_thread(wf.run, ev)
+    _duration = round(_time.time() - _started, 1)
     audit_log("RCA_LIVE", ev.incident_id, "web-user", "investigation_complete",
               ev.service_name)
     result = state.final_report.model_dump()
@@ -874,6 +980,22 @@ async def run_live_rca():
     LAST_INVESTIGATION[ev.incident_id] = {"state": state, "category": _best_cat}
     while len(LAST_INVESTIGATION) > 20:
         LAST_INVESTIGATION.pop(next(iter(LAST_INVESTIGATION)))
+    try:
+        _domain, _sub = domain_for_category(_best_cat)
+        result["error_domain"], result["error_subcategory"] = _domain, _sub
+        result["evidence_source"] = evidence_source
+        _registry().add_rca_run(ev.incident_id, {"category": _best_cat,
+                                                 "confidence": state.final_report.confidence,
+                                                 "duration_s": _duration, "evidence_source": evidence_source})
+        _registry().set_fields(ev.incident_id, error_domain=_domain, error_subcategory=_sub)
+        _bump(ev.incident_id, "ROOT_CAUSE_IDENTIFIED", "rca-agent")
+        record_activity("ROOT_CAUSE_IDENTIFIED", ev.incident_id, "rca-agent",
+                        f"{_best_cat} ({state.final_report.confidence})", {})
+        from orchestration.notifications import notify
+        notify("RCA_COMPLETE", {"incident_id": ev.incident_id, "target": ev.service_name,
+                                "description": f"RCA {_best_cat} {state.final_report.confidence}"})
+    except Exception:
+        pass
     return result
 
 # --- Code fix + PR pipeline (Parts 5-15, 19) ---
@@ -883,6 +1005,53 @@ FIX_JOBS = {}  # incident_id -> {"job": FixJob, "proposal": PatchProposal|None, 
 LAST_RCA = {}  # incident_id -> validated RCA summary for code mapping
 LAST_INVESTIGATION = {}  # incident_id -> {"state": InvestigationState, "category": str} (bounded, for explicit remediation proposals)
 APPROVAL_PARAMS = {}  # approval_id -> suggested executor params (rollback target, scale bounds)
+
+
+def _record_agent_pr(incident_id, rca, proposal, approval_req, job, branch, base, title, body):
+    """Persist every agent PR attempt (Open or Failed) to the PR registry."""
+    import os as _os
+    from datetime import datetime, timezone as _tz
+    from projects.store import ProjectStore, PRRegistry
+    from schemas.project import PullRequestRecord
+    from orchestration.incident_registry import record_activity
+    from orchestration.notifications import notify
+    service = rca.get("service", "checkout-service")
+    project_id = ProjectStore().resolve_project(service)
+    number = job.pr_number
+    pr_id = f"PR-{number}" if number else f"PR-{incident_id}-{job.patch_sha256[:8].upper()}"
+    record = PullRequestRecord(
+        pr_id=pr_id, pr_number=number, project_id=project_id, incident_id=incident_id,
+        repository=_os.getenv("DEMO_APP_REPO_SLUG", "swethakambathula/cloud-rca-demo-app"),
+        branch=branch or "", base_branch=base, commit_sha=job.commit or "",
+        title=title, root_cause=rca.get("root_cause", ""),
+        root_cause_category=proposal.root_cause_category,
+        confidence=float(rca.get("confidence", 0.0) or 0.0), risk=proposal.risk,
+        status="Open" if job.pr_url else "Failed",
+        tests_status="passed" if job.pr_url else "failed",
+        tests_output=(job.test_output or "")[-2000:],
+        files_changed=list(proposal.files_changed), additions=proposal.lines_added,
+        deletions=proposal.lines_removed, patch=proposal.patch,
+        supporting_evidence=list(rca.get("supporting_evidence", []))[:8],
+        approval_id=approval_req.approval_id, approved_by=approval_req.decided_by or "",
+        approved_at=approval_req.decided_at or "",
+        created_at=datetime.now(_tz.utc).isoformat(), created_by="rca-agent",
+        external_url=job.pr_url or "")
+    PRRegistry().record(record)
+    if job.pr_url:
+        _bump(incident_id, "PR_CREATED", "gitops")
+        try:
+            _registry().set_fields(incident_id, pr_id=pr_id)
+        except Exception:
+            pass
+        record_activity("PR_CREATED", incident_id, "gitops", f"{pr_id} {title}",
+                        {"pr_url": job.pr_url, "branch": branch})
+        notify("PR_CREATED", {"incident_id": incident_id, "target": branch,
+                              "description": f"{pr_id} opened: {title}"})
+    else:
+        record_activity("PR_FAILED", incident_id, "gitops", job.error or "PR creation failed", {})
+        notify("PR_FAILED", {"incident_id": incident_id, "target": branch,
+                             "description": job.error or "PR creation failed"})
+    return record
 
 
 def _suggest_infra_params(evidence, action: str) -> dict:
@@ -1080,6 +1249,17 @@ async def generate_fix(incident_id: str):
     audit_log("FIX_PROPOSED", incident_id, "PatchAgent", "code_fix_pr",
               approval.target_resource, approval_id=approval.approval_id,
               result=proposal.patch_sha256[:12])
+    try:
+        from orchestration.incident_registry import record_activity
+        from orchestration.notifications import notify
+        _bump(incident_id, "REMEDIATION_PROPOSED", "PatchAgent")
+        _bump(incident_id, "WAITING_APPROVAL", "PatchAgent")
+        record_activity("APPROVAL_REQUESTED", incident_id, "PatchAgent",
+                        "code fix approval requested", {"approval_id": approval.approval_id})
+        notify("APPROVAL_REQUESTED", {"incident_id": incident_id, "target": "code_fix_pr",
+                                      "description": "code fix awaiting approval"})
+    except Exception:
+        pass
     return {"investigation": inv.model_dump(), "proposal": proposal.model_dump(),
             "approval": approval.model_dump(), "fix_status": job.status.value}
 
@@ -1114,6 +1294,16 @@ def approve_fix(incident_id: str, body: dict = None):
     entry["job"].status = FixStatus.APPROVED
     audit_log("FIX_APPROVED", incident_id, "human-operator", "code_fix_pr",
               req.target_resource, approval_id=req.approval_id, result=msg)
+    try:
+        from orchestration.incident_registry import record_activity
+        from orchestration.notifications import notify
+        _bump(incident_id, "APPROVED", "human-operator")
+        record_activity("APPROVAL_APPROVED", incident_id, "human-operator",
+                        "code fix approved", {"approval_id": req.approval_id})
+        notify("APPROVAL_DECIDED", {"incident_id": incident_id, "target": "code_fix_pr",
+                                    "description": "code fix approved"})
+    except Exception:
+        pass
     return {"fix_status": entry["job"].status.value, "approval": req.model_dump()}
 
 
@@ -1127,6 +1317,16 @@ def reject_fix(incident_id: str, body: dict = None):
     entry["job"].status = FixStatus.REJECTED
     audit_log("FIX_REJECTED", incident_id, "human-operator", "code_fix_pr",
               req.target_resource, approval_id=req.approval_id, result=msg)
+    try:
+        from orchestration.incident_registry import record_activity
+        from orchestration.notifications import notify
+        _bump(incident_id, "REMEDIATION_PROPOSED", "human-operator")
+        record_activity("APPROVAL_REJECTED", incident_id, "human-operator",
+                        f"code fix rejected: {msg}", {"approval_id": req.approval_id})
+        notify("APPROVAL_DECIDED", {"incident_id": incident_id, "target": "code_fix_pr",
+                                    "description": "code fix rejected"})
+    except Exception:
+        pass
     return {"fix_status": entry["job"].status.value, "approval": req.model_dump()}
 
 
@@ -1189,6 +1389,10 @@ async def apply_fix(incident_id: str):
             job.status, job.error = FixStatus.FAILED, f"PR not created: {pr.get('blocked')}. {pr.get('hint','')}"
         audit_log("FIX_APPLIED", incident_id, "gitops", "code_fix_pr", repo,
                   approval_id=req.approval_id, result=f"{job.status.value} {job.pr_url or ''}")
+        try:
+            _record_agent_pr(incident_id, rca, proposal, req, job, branch, base, title, body)
+        except Exception:
+            pass
         return {"fix_status": job.status.value, "job": job.model_dump(), "diffstat": diffstat}
     except (ValueError, RuntimeError, PermissionError) as e:
         job.status, job.error = FixStatus.FAILED, str(e)[:500]
@@ -1213,9 +1417,522 @@ def get_pr(incident_id: str):
             "branch": job.branch, "commit": job.commit,
             "fix_status": job.status.value}
 
-# Keep original analyze endpoint
+# ================= UX platform layer =================
+# Projects, incident lifecycle, PR registry, uploads, home stats, taxonomy.
+# All additive: existing routes, element IDs and RCA behavior are unchanged.
 
-if __name__ == "__main__":
+
+def _bump(incident_id: str, target: str, actor: str = "system") -> None:
+    try:
+        from orchestration.incident_registry import IncidentRegistry
+        IncidentRegistry().transition(incident_id, target, actor)
+    except Exception:
+        pass  # re-runs or out-of-order states must never break RCA
+
+
+def _projects():
+    from projects.store import ProjectStore
+    return ProjectStore()
+
+
+def _registry():
+    from orchestration.incident_registry import IncidentRegistry
+    return IncidentRegistry()
+
+
+@app.get("/api/taxonomy")
+def get_taxonomy():
+    from tools.error_taxonomy import SCENARIOS, CATEGORIES, GROUPS, LABELS
+    return {
+        "scenarios": {k: {"domain": d, "subcategory": s} for k, (d, s) in SCENARIOS.items()},
+        "categories": {k: {"domain": d, "subcategory": s} for k, (d, s) in CATEGORIES.items()},
+        "groups": GROUPS,
+        "labels": LABELS,
+    }
+
+
+# ---------- projects ----------
+
+@app.get("/api/projects")
+def list_projects():
+    store = _projects()
+    reg = _registry()
+    out = []
+    for p in store.list():
+        d = p.model_dump()
+        incs = reg.list(project_id=p.project_id)
+        d["open_incidents"] = sum(1 for i in incs if i.get("status") not in ("RESOLVED", "FAILED"))
+        d["resolved_incidents"] = sum(1 for i in incs if i.get("status") == "RESOLVED")
+        from projects.store import PRRegistry
+        d["open_prs"] = sum(1 for r in PRRegistry().list(project_id=p.project_id)
+                            if r.status in ("Open", "Awaiting Approval"))
+        out.append(d)
+    return out
+
+
+@app.post("/api/projects")
+def create_project(body: dict):
+    import re as _re
+    from schemas.project import Project
+    from orchestration.incident_registry import record_activity
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Project name is required")
+    pid = body.get("project_id") or _re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    project = Project(
+        project_id=pid, name=name, description=body.get("description", ""),
+        environment=body.get("environment", "prod"), team_owner=body.get("team_owner", ""),
+        repository_url=body.get("repository_url", ""), provider=body.get("provider", "github"),
+        default_branch=body.get("default_branch", "main"), local_path=body.get("local_path", ""),
+        gcp_project_id=body.get("gcp_project_id", ""), region=body.get("region", ""),
+        services=body.get("services", []), status="active",
+        data_sources=[{"kind": k, "status": "connected", "detail": ""}
+                      for k in body.get("sources", []) if k in ("git", "gcp", "upload")],
+    )
+    from datetime import datetime, timezone as _tz
+    project.created_at = datetime.now(_tz.utc).isoformat()
+    _projects().upsert(project)
+    record_activity("PROJECT_CREATED", "", "web-user", f"project {pid} onboarded",
+                    {"project_id": pid})
+    return project.model_dump()
+
+
+@app.get("/api/projects/{project_id}")
+def get_project(project_id: str):
+    project = _projects().get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    d = project.model_dump()
+    reg = _registry()
+    d["incidents"] = reg.list(project_id=project_id)
+    from projects.store import PRRegistry
+    d["pull_requests"] = [r.model_dump() for r in PRRegistry().list(project_id=project_id)]
+    return d
+
+
+@app.post("/api/projects/onboard")
+def onboard_project(body: dict):
+    """Wizard submit: validate -> scan (read-only) -> persist -> readiness."""
+    from projects.scanner import scan_repo, detect_default_branch, connection_ok
+    repo_url = (body.get("repository_url") or "").strip()
+    local_path = (body.get("local_path") or body.get("repository_path") or "").strip()
+    conn = connection_ok(path=local_path, url=repo_url)
+    scan, branch = {"error": "no repository given"}, body.get("default_branch", "main") or "main"
+    if local_path:
+        scan = scan_repo(local_path)
+        if not body.get("default_branch"):
+            branch = detect_default_branch(local_path)
+    project_body = dict(body)
+    project_body["default_branch"] = branch
+    created = create_project(project_body)
+    pid = created["project_id"]
+    store = _projects()
+    project = store.get(pid)
+    kinds = set()
+    if repo_url or local_path:
+        kinds.add("git")
+    if body.get("gcp_project_id"):
+        kinds.add("gcp")
+    from schemas.project import DataSource
+    project.data_sources = [DataSource(kind=k, status="connected" if (k != "git" or conn["ok"]) else "error",
+                                       detail="") for k in sorted(kinds)]
+    project.detected = {k: v for k, v in scan.items() if k != "error"}
+    if local_path and not project.services:
+        project.services = (scan.get("services") or [])[:8]
+    from datetime import datetime, timezone as _tz
+    project.last_scan = datetime.now(_tz.utc).isoformat()
+    store.upsert(project)
+    reasons = []
+    if not conn["ok"] and (repo_url or local_path):
+        reasons.append("repository unreachable: " + conn["detail"])
+    if not project.services:
+        reasons.append("no services detected")
+    readiness = {"rca_ready": not reasons, "reasons": reasons,
+                 "tests": (scan.get("tests") or [])[:10]}
+    return {"project": project.model_dump(), "scan": scan,
+            "connection": conn, "readiness": readiness}
+
+
+@app.post("/api/projects/{project_id}/scan")
+def scan_project(project_id: str):
+    from projects.scanner import scan_repo
+    project = _projects().get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    path = project.local_path or "cloud-rca-demo-app"
+    scan = scan_repo(path if os.path.isabs(path) else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), path))
+    from datetime import datetime, timezone as _tz
+    project.detected = {k: v for k, v in scan.items() if k != "error"}
+    project.last_scan = datetime.now(_tz.utc).isoformat()
+    if not project.services and scan.get("services"):
+        project.services = scan["services"][:8]
+    _projects().upsert(project)
+    return {"project_id": project_id, "scan": scan}
+
+
+@app.post("/api/projects/{project_id}/test-connection")
+def test_project_connection(project_id: str, body: dict):
+    from projects.scanner import connection_ok
+    project = _projects().get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    kind = (body.get("kind") or "git").lower()
+    if kind == "git":
+        return connection_ok(path=body.get("local_path") or project.local_path,
+                             url=body.get("repository_url") or project.repository_url)
+    if kind == "gcp":
+        pid = body.get("gcp_project_id") or project.gcp_project_id
+        return {"ok": bool(pid), "detail": "project id set" if pid else "no GCP project configured"}
+    return {"ok": False, "detail": f"unknown connection kind {kind}"}
+
+
+@app.post("/api/projects/{project_id}/disconnect")
+def disconnect_project_source(project_id: str, body: dict):
+    store = _projects()
+    project = store.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    kind = (body.get("kind") or "git").lower()
+    if kind == "git":
+        project.repository_url, project.local_path = "", ""
+        project.repo_access = "READ_ONLY"
+    project.data_sources = [s for s in project.data_sources if s.kind != kind]
+    store.upsert(project)
+    return project.model_dump()
+
+
+# ---------- incidents ----------
+
+def _scenario_for_file(name: str):
+    n = (name or "").lower()
+    for key in ("db_timeout", "pool_exhaustion", "bad_deployment", "dependency",
+                "traffic_overload", "config_regression"):
+        if key in n:
+            return {"db_timeout": "db-timeout", "pool_exhaustion": "pool-exhaustion",
+                    "bad_deployment": "bad-deployment", "dependency": "dependency-failure",
+                    "traffic_overload": "traffic-overload",
+                    "config_regression": "config-error"}[key]
+    return None
+
+
+def _incident_cards():
+    """Static fixtures merged with lifecycle registry (compat loader, Part 34)."""
+    from tools.error_taxonomy import domain_for_scenario
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cards = []
+    for path in sorted(glob.glob(os.path.join(base_dir, "data", "incidents", "incident_00*.json"))):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        scenario = _scenario_for_file(os.path.basename(path))
+        domain, sub = domain_for_scenario(scenario) if scenario else ("Unknown", "Unknown")
+        service = data.get("service_name", "")
+        rec = _registry().get(data.get("incident_id", ""))
+        project_id = (rec or {}).get("project_id") or _projects().resolve_project(service)
+        cards.append({
+            "incident_id": data.get("incident_id", os.path.basename(path)),
+            "file": os.path.basename(path),
+            "title": (data.get("symptoms") or [""])[0][:90],
+            "service": service,
+            "severity": data.get("severity", "P2"),
+            "status": (rec or {}).get("status", "Open"),
+            "project_id": project_id,
+            "domain": domain, "subcategory": sub,
+            "start_time": data.get("start_time", ""),
+        })
+    for rec in _registry().list():
+        if not any(c["incident_id"] == rec["incident_id"] for c in cards):
+            cards.append({
+                "incident_id": rec["incident_id"], "file": "",
+                "title": rec.get("title", ""), "service": (rec.get("services") or [""])[0],
+                "severity": rec.get("severity", "P2"), "status": rec.get("status", "NEW"),
+                "project_id": rec.get("project_id", "unassigned"),
+                "domain": rec.get("error_domain", ""), "subcategory": rec.get("error_subcategory", ""),
+                "start_time": rec.get("started_at", ""),
+            })
+    return cards
+
+
+@app.get("/api/incidents/meta")
+def incidents_meta():
+    return _incident_cards()
+
+
+@app.get("/api/incidents/{incident_id}")
+def incident_detail(incident_id: str):
+    from projects.store import PRRegistry
+    rec = _registry().get(incident_id) or {"incident_id": incident_id, "status": "Open"}
+    card = next((c for c in _incident_cards() if c["incident_id"] == incident_id), {})
+    return {"incident": rec, "file_meta": card,
+            "project": (_projects().get(rec.get("project_id", "")) or
+                        _projects().get(card.get("project_id", ""))).model_dump()
+            if (rec.get("project_id") or card.get("project_id")) else None,
+            "rca_runs": rec.get("rca_runs", []), "notes": rec.get("notes", []),
+            "history": rec.get("history", []),
+            "pull_requests": [r.model_dump() for r in PRRegistry().by_incident(incident_id)]}
+
+
+@app.post("/api/projects/{project_id}/incidents")
+def create_incident(project_id: str, body: dict):
+    """Manual incident (mode A). Stores evidence inputs so RCA can run on it."""
+    import re as _re
+    import uuid as _uuid
+    project = _projects().get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Incident title is required")
+    sev = str(body.get("severity", "P2")).strip().lower()
+    sev = {"critical": "P1", "high": "P2", "medium": "P3", "low": "P3",
+           "p1": "P1", "p2": "P2", "p3": "P3"}.get(sev, "P2")
+    incident_id = f"INC-{_re.sub(r'[^A-Z0-9]+', '-', title.upper()).strip('-')[:24]}-{_uuid.uuid4().hex[:4].upper()}"
+    services = body.get("affected_services") or body.get("services") or project.services[:1]
+    MANUAL_EVIDENCE[incident_id] = {
+        "title": title, "description": body.get("description", ""),
+        "environment": body.get("environment", project.environment),
+        "severity": sev, "services": services,
+        "start_time": body.get("start_time") or "",
+        "trace_id": body.get("trace_id", ""), "request_id": body.get("request_id", ""),
+        "error_signature": body.get("error_signature", ""),
+        "revision": body.get("revision", ""), "context": body.get("context", ""),
+        "project_id": project_id,
+    }
+    from orchestration.incident_registry import record_activity
+    _registry().ensure(incident_id, project_id=project_id, title=title, severity=sev,
+                       environment=body.get("environment", project.environment),
+                       services=services, evidence_source="manual")
+    record_activity("INCIDENT_CREATED", incident_id, "web-user", title,
+                    {"project_id": project_id, "mode": "manual"})
+    return {"incident_id": incident_id, "status": "NEW", "project_id": project_id}
+
+
+@app.post("/api/incidents/{incident_id}/notes")
+def add_incident_note(incident_id: str, body: dict):
+    author = (body.get("author") or "operator").strip() or "operator"
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Note text is required")
+    rec = _registry().add_note(incident_id, author, text)
+    return {"incident_id": incident_id, "notes": rec.get("notes", [])}
+
+
+@app.get("/api/incidents/{incident_id}/activity")
+def incident_activity(incident_id: str):
+    from orchestration.incident_registry import recent_activity
+    return recent_activity(limit=50, incident_id=incident_id)
+
+
+@app.get("/api/incidents/{incident_id}/export")
+def export_rca(incident_id: str, format: str = "json"):
+    entry = LAST_INVESTIGATION.get(incident_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No RCA investigation stored for this incident")
+    report = entry["state"].final_report
+    if format == "markdown":
+        lines = [f"# RCA Report {incident_id}", "",
+                 f"- **Root cause:** {report.root_cause}",
+                 f"- **Category:** {entry['category']}",
+                 f"- **Confidence:** {report.confidence}",
+                 f"- **Services:** {', '.join(report.affected_services)}",
+                 f"- **Blast radius:** {report.blast_radius.classification} - {report.blast_radius.estimated_scope}", "",
+                 "## Supporting evidence"] + [f"- {e}" for e in report.supporting_evidence] + [
+                 "", "## Contradictory evidence"] + [f"- {e}" for e in report.contradictory_evidence] + [
+                 "", "## Timeline"] + [f"- {t.timestamp} [{t.event_type}] {t.description}" for t in report.timeline] + [
+                 "", f"## Recommended next action", report.recommended_next_action]
+        return PlainTextResponse("\n".join(lines), media_type="text/markdown")
+    return JSONResponse(report.model_dump())
+
+
+# ---------- home ----------
+
+@app.get("/api/home/stats")
+def home_stats():
+    from orchestration.incident_registry import recent_activity
+    from projects.store import PRRegistry
+    cards = _incident_cards()
+    open_incs = [c for c in cards if c.get("status") not in ("RESOLVED", "FAILED")]
+    rca_completed = sum(len((__import__("orchestration.incident_registry", fromlist=["IncidentRegistry"]).IncidentRegistry().get(c["incident_id"]) or {}).get("rca_runs", [])) for c in cards)
+    prs = PRRegistry().list()
+    return {
+        "projects": len(_projects().list()),
+        "open_incidents": len(open_incs),
+        "rca_completed": rca_completed,
+        "prs_awaiting_approval": sum(1 for r in prs if r.status == "Awaiting Approval"),
+        "prs_created": len(prs),
+        "pending_approvals": len(global_approval_manager.list_pending()),
+        "recent_activity": recent_activity(limit=12),
+        "recent_prs": [r.model_dump() for r in prs[:5]],
+        "recent_incidents": cards[:6],
+    }
+
+
+# ---------- pull requests ----------
+
+@app.get("/api/pull-requests")
+def list_prs(project: str = ""):
+    from projects.store import PRRegistry
+    return [r.model_dump() for r in PRRegistry().list(project_id=project)]
+
+
+@app.get("/api/pull-requests/{pr_id}")
+def pr_detail(pr_id: str):
+    from projects.store import PRRegistry
+    pr = PRRegistry().get(pr_id)
+    if not pr:
+        raise HTTPException(status_code=404, detail="Pull request not found")
+    return pr.model_dump()
+
+
+# ---------- uploads ----------
+
+@app.post("/api/logs/upload")
+async def upload_logs(project_id: str = Form("unassigned"),
+                      source_type: str = Form("Auto Detect"),
+                      service: str = Form(""), incident_start: str = Form(""),
+                      region: str = Form(""), environment: str = Form(""),
+                      description: str = Form(""),
+                      files: list = File(...)):
+    from ingestion.upload_handler import ingest_files
+    from projects.store import AnalysisStore
+    from schemas.project import LogAnalysis
+    from orchestration.incident_registry import record_activity
+    from datetime import datetime, timezone as _tz
+
+    uploads = []
+    for f in files:
+        content = await f.read()
+        uploads.append((f.filename or "upload.log", content))
+    analysis_id, summaries, preview, warnings = ingest_files(uploads, source_type)
+    from ingestion.normalizer import summarize as _summarize
+    preview_stats = _summarize(preview)
+    analysis = LogAnalysis(
+        analysis_id=analysis_id, project_id=project_id,
+        files=[{**s} for s in summaries], source_type=source_type,
+        context={"service": service, "incident_start": incident_start,
+                 "region": region, "environment": environment,
+                 "description": description},
+        services=preview_stats["services"], time_start=preview_stats["time_start"],
+        time_end=preview_stats["time_end"], record_count=preview_stats["record_count"],
+        error_codes=preview_stats["error_codes"], warning_count=preview_stats["warning_count"],
+        created_at=datetime.now(_tz.utc).isoformat(),
+    )
+    AnalysisStore().save(analysis)
+    record_activity("LOG_COLLECTED", "", "web-user",
+                    f"{len(summaries)} file(s) uploaded for {project_id}",
+                    {"analysis_id": analysis_id})
+    return {"analysis_id": analysis_id, "files": [s for s in summaries],
+            "warnings": warnings, "preview": preview[:50], "preview_stats": preview_stats,
+            "project_id": project_id}
+
+
+@app.get("/api/log-analyses")
+def list_analyses():
+    from projects.store import AnalysisStore
+    return [a.model_dump() for a in AnalysisStore().list()]
+
+
+@app.get("/api/log-analyses/{analysis_id}")
+def analysis_detail(analysis_id: str):
+    from projects.store import AnalysisStore
+    analysis = AnalysisStore().get(analysis_id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return analysis.model_dump()
+
+
+@app.post("/api/logs/{analysis_id}/analyze")
+async def analyze_upload(analysis_id: str):
+    from ingestion.upload_handler import load_parsed
+    from ingestion.normalizer import normalize, summarize, to_evidence_inputs
+    from tools.normalizer import normalize_evidence
+    from schemas.evidence import IncidentEvidence
+    from tools.error_taxonomy import domain_for_category
+    from projects.store import AnalysisStore
+    from orchestration.incident_registry import record_activity
+    analysis = AnalysisStore().get(analysis_id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    raw = load_parsed(analysis_id)
+    if not raw:
+        raise HTTPException(status_code=400, detail="No parsed records for this analysis")
+    records = normalize(raw)
+    stats = summarize(records)
+    service = analysis.context.get("service") or (stats["services"][0] if stats["services"] else "unknown-service")
+    inputs = to_evidence_inputs(records, service)
+    incident_id = f"INC-UPLOAD-{analysis_id.replace('AN-', '')[:8]}"
+    deps = sorted({r["dependency"] for r in records if r.get("dependency")})
+    traces = sorted({r["trace_id"] for r in records if r.get("trace_id")})[:10]
+    ev = normalize_evidence(
+        incident_id=incident_id,
+        project_id=(analysis.context.get("region") and "upload") or "upload",
+        service_name=service,
+        start_time=stats["time_start"] or analysis.created_at,
+        end_time=stats["time_end"] or analysis.created_at,
+        raw_logs=inputs["raw_logs"], raw_metrics=inputs["raw_metrics"],
+        deployment_events=[], raw_traces=[{"trace_id": t} for t in traces],
+        dependencies=[{"name": d, "status": "UNKNOWN"} for d in deps if d],
+        revision_name=None, region=analysis.context.get("region", ""))
+    import time as _time
+    wf = InvestigationWorkflow()
+    started = _time.time()
+    state = await asyncio.to_thread(wf.run, ev)
+    duration = round(_time.time() - started, 1)
+    best = next((h for h in state.hypotheses
+                 if any(v.hypothesis_id == h.hypothesis_id and v.accepted
+                        for v in state.validated_hypotheses)),
+                state.hypotheses[0] if state.hypotheses else None)
+    category = best.root_cause_category if best else "unknown"
+    domain, sub = domain_for_category(category)
+    LAST_RCA[incident_id] = {
+        "root_cause_category": category, "root_cause": state.final_report.root_cause,
+        "confidence": state.final_report.confidence,
+        "supporting_evidence": state.final_report.supporting_evidence,
+        "contradictory_evidence": state.final_report.contradictory_evidence,
+        "service": service,
+    }
+    LAST_INVESTIGATION[incident_id] = {"state": state, "category": category}
+    project_id = analysis.project_id
+    _registry().ensure(incident_id, project_id=project_id, title=f"Uploaded logs RCA ({service})",
+                       severity=ev.severity, services=[service], evidence_source="upload")
+    for target in ("COLLECTING_EVIDENCE", "ANALYZING", "ROOT_CAUSE_IDENTIFIED"):
+        _bump(incident_id, target)
+    _registry().add_rca_run(incident_id, {"category": category,
+                                          "confidence": state.final_report.confidence,
+                                          "duration_s": duration, "evidence_source": "upload"})
+    _registry().set_fields(incident_id, error_domain=domain, error_subcategory=sub)
+    record_activity("RCA_STARTED", incident_id, "web-user", "file-based RCA started",
+                    {"analysis_id": analysis_id})
+    record_activity("ROOT_CAUSE_IDENTIFIED", incident_id, "rca-agent",
+                    f"{category} ({state.final_report.confidence})", {})
+    analysis.services, analysis.time_start, analysis.time_end = stats["services"], stats["time_start"], stats["time_end"]
+    analysis.record_count, analysis.error_codes = stats["record_count"], stats["error_codes"]
+    analysis.warning_count, analysis.status = stats["warning_count"], "analyzed"
+    analysis.rca = {"incident_id": incident_id, "root_cause_category": category,
+                    "root_cause": state.final_report.root_cause,
+                    "confidence": state.final_report.confidence,
+                    "supporting_evidence": state.final_report.supporting_evidence,
+                    "contradictory_evidence": state.final_report.contradictory_evidence,
+                    "timeline": [t.model_dump() for t in state.final_report.timeline],
+                    "blast_radius": state.final_report.blast_radius.model_dump(),
+                    "recommended_action": state.final_report.recommended_next_action,
+                    "domain": domain, "subcategory": sub, "evidence_source": "upload",
+                    "duration_s": duration}
+    AnalysisStore().save(analysis)
+    from orchestration.notifications import notify
+    notify("RCA_COMPLETE", {"incident_id": incident_id, "target": service,
+                            "description": f"upload RCA {category} {state.final_report.confidence}"})
+    result = dict(analysis.rca)
+    result.update({"analysis_id": analysis_id,
+                   "files": [f["filename"] for f in analysis.files],
+                   "record_count": stats["record_count"],
+                   "time_range": [stats["time_start"], stats["time_end"]]})
+    return result
+
+# Keep original analyze endpoint
     import os
     port = int(os.getenv("PORT", "8080"))
     uvicorn.run("app.main:app", host="0.0.0.0", port=port)
