@@ -34,12 +34,15 @@ def test_dependency_timeout_fixed():
 
 
 def test_null_pointer_fixed():
-    """payment_processor must guard None profile before attribute access."""
-    import inspect
+    """Guest checkout must raise typed error, not AttributeError on None."""
     from services.checkout import payment_processor
-    src = inspect.getsource(payment_processor.process_payment)
-    assert "payment_profile is None" in src or "PaymentProfileNotFound" in src, \
-        "None guard missing in process_payment"
+    try:
+        payment_processor.process_payment({"user_id": "guest"})
+    except payment_processor.PaymentProfileNotFound:
+        return
+    except AttributeError as e:
+        raise AssertionError(f"None guard missing in process_payment: {e}")
+    raise AssertionError("guest checkout should fail fast with PaymentProfileNotFound")
 
 
 def test_contract_mismatch_fixed():
@@ -52,13 +55,13 @@ def test_contract_mismatch_fixed():
 def test_race_condition_fixed():
     import inspect
     from services.checkout import concurrency
-    src = inspect.getsource(concurrency.deduct_inventory)
-    assert "use_lock" in src or "_lock" in src or "compare" in src.lower(), \
-        "no locking/compare-and-swap in deduct_inventory"
+    sig = inspect.signature(concurrency.deduct_inventory)
+    assert sig.parameters["use_lock"].default is True, \
+        "deduct_inventory still defaults to the unlocked (racy) path"
 
 
 def test_slow_query_fixed():
     from services.checkout import queries
     import inspect
     src = inspect.getsource(queries.order_history)
-    assert "index" in src.lower() or "user_id" in src, "order_history still unindexed"
+    assert "_INDEX" in src or "bisect" in src, "order_history still a full-table scan"

@@ -296,6 +296,70 @@ LEGACY_ALIASES = {
 ALLOWED_SIM_ENVS = ("demo", "local", "test")
 
 
+# Golden demo scenarios: highly polished, each demonstrating different evidence.
+GOLDEN = [
+    {"scenario_id": "bad-deployment",
+     "story": ("Watch the RCA agent correlate a new deployment, stack trace, "
+               "source code change, and failing test before proposing a fix."),
+     "estimate": "2–3 minutes",
+     "demonstrates": ["Logs", "Metrics", "Deployment", "Git Diff", "Code RCA",
+                      "Patch", "Approval", "PR", "Verification"],
+     "expected_test": "tests/test_incident_scenarios.py::test_bad_deployment_fixed"},
+    {"scenario_id": "null-pointer",
+     "story": ("Follow a NoneType crash from stack trace to the exact line, "
+               "then a minimal guard fix with human approval."),
+     "estimate": "2–3 minutes",
+     "demonstrates": ["Logs", "Stack Trace", "Code RCA", "Patch", "Approval", "PR"],
+     "expected_test": "tests/test_incident_scenarios.py::test_null_pointer_fixed"},
+    {"scenario_id": "pool-exhaustion",
+     "story": ("See pool saturation distinguished from a database outage, "
+               "with the traffic-overload alternative explicitly rejected."),
+     "estimate": "2–3 minutes",
+     "demonstrates": ["Logs", "Metrics", "Code RCA", "Patch", "Approval", "PR", "Verification"],
+     "expected_test": "tests/test_incident_scenarios.py::test_pool_exhaustion_fixed"},
+    {"scenario_id": "api-contract-mismatch",
+     "story": ("Trace a downstream 500 to a serialization contract break in "
+               "the orders service boundary."),
+     "estimate": "2 minutes",
+     "demonstrates": ["Logs", "Stack Trace", "Dependency", "Code RCA", "Patch"],
+     "expected_test": "tests/test_incident_scenarios.py::test_contract_mismatch_fixed"},
+    {"scenario_id": "feature-flag-regression",
+     "story": ("Connect a flags-gated crash to the revision that enabled it, "
+               "then roll the flag back safely."),
+     "estimate": "2 minutes",
+     "demonstrates": ["Logs", "Deployment", "Config", "Code RCA", "Patch"],
+     "expected_test": "tests/test_incident_scenarios.py::test_bad_deployment_fixed"},
+    {"scenario_id": "slow-query",
+     "story": ("Follow p95 latency to an unindexed query path and an indexed "
+               "lookup fix validated by tests."),
+     "estimate": "2 minutes",
+     "demonstrates": ["Logs", "Latency", "Code RCA", "Patch", "Verification"],
+     "expected_test": "tests/test_incident_scenarios.py::test_slow_query_fixed"},
+    {"scenario_id": "race-condition",
+     "story": ("Reconstruct a lost-update race from duplicate events and lock "
+               "the critical section."),
+     "estimate": "2–3 minutes",
+     "demonstrates": ["Logs", "Traces", "Code RCA", "Patch"],
+     "expected_test": "tests/test_incident_scenarios.py::test_race_condition_fixed"},
+    {"scenario_id": "missing-env-var",
+     "story": ("Pin a config-gated outage to a missing secret and restore it "
+               "from the environment."),
+     "estimate": "2 minutes",
+     "demonstrates": ["Logs", "Config", "Deployment", "Patch", "Verification"],
+     "expected_test": "tests/test_incident_scenarios.py::test_config_regression_fixed"},
+]
+
+
+def golden_catalog() -> List[Dict]:
+    out = []
+    for g in GOLDEN:
+        spec = TIER1.get(g["scenario_id"], {})
+        out.append({**{k: spec.get(k) for k in (
+            "scenario_id", "category", "title", "blurb", "service", "file",
+            "function", "error_signature", "expected_rca")}, **g})
+    return out
+
+
 def catalog() -> List[Dict]:
     return [{k: v[k] for k in (
         "scenario_id", "category", "subcategory", "title", "blurb",

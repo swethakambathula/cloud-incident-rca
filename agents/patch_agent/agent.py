@@ -106,8 +106,16 @@ PATCHES: Dict[str, Dict] = {
 class PatchAgent:
     agent_name = "Patch Agent"
 
-    def generate(self, incident_id: str, root_cause_category: str) -> Optional[PatchProposal]:
+    def generate(self, incident_id: str, root_cause_category: str,
+                   preferred_file: str = "") -> Optional[PatchProposal]:
         spec = PATCHES.get(root_cause_category)
+        # Prefer the patch that matches the blamed code finding's file so the
+        # fix addresses the investigated location, not just the category.
+        if preferred_file:
+            for key, cand in PATCHES.items():
+                if cand.get("file") == preferred_file:
+                    spec = cand
+                    break
         if not spec:
             return None
         path = os.path.join(repo_root(), spec["file"])

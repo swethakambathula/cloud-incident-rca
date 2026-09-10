@@ -31,6 +31,8 @@ class Project(BaseModel):
                                    description="service -> repo path, e.g. checkout-service -> services/checkout/")
     readiness: dict = Field(default_factory=dict,
                             description="Last repository readiness scan result")
+    demo_mode: bool = Field(default=False,
+                            description="Demo Mode: synthetic evidence, isolated repo, no production impact")
     created_at: str = ""
     last_scan: str = ""
     detected: dict = Field(default_factory=dict)

@@ -295,12 +295,12 @@ def test_app_shell_layout_rules():
     css = html.split("<style>")[1].split("</style>")[0]
     assert html.count('<nav id="topnav"') == 1
     assert html.count('<div class="sidebar">') == 1
-    assert html.count('<div class="main-content">') == 1
-    assert html.count('<div id="app">') == 1
+    assert html.count('<main class="main-content">') == 1
+    assert html.count('<div id="app" class="app-body">') == 1
     for view in ["view-home", "view-projects", "view-incidents", "view-prs",
                  "view-analyze", "view-settings"]:
         assert html.count(f'id="{view}"') == 1
-    assert "grid-template-rows:auto" in css.replace(" ", "")
+    assert "grid-template-rows:var(--header-h)minmax(0,1fr)" in css.replace(" ", "")
     assert "--sidebar-width:272px" in css.replace(" ", "")
     assert "max-width: 767px" in css or "max-width:767px" in css
     queries = re.findall(r"@media\s*\([^)]*\)", css)
