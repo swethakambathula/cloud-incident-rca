@@ -541,6 +541,11 @@ async function simulate(scenario){
   document.getElementById('inc-title').innerText='Live Simulated: '+scenario;
   document.getElementById('inc-desc').innerText='Injected at '+new Date().toLocaleTimeString()+' — logs streaming below → click Do RCA';
   document.getElementById('codefix-output').style.display='none'; LAST_INCIDENT=null;
+  try{
+    const sc=(TAX&&TAX.scenarios||{})[scenario]||{};
+    const cat=document.getElementById('sim-cat');
+    if(cat) cat.innerText='Category: '+(sc.domain||'Unknown')+' / '+(sc.subcategory||'Unknown');
+  }catch(e){}
   btn.innerHTML='<span class="status-dot dot-red"></span>Error injected!';
   setTimeout(()=>btn.innerHTML='<span class="status-dot dot-green"></span>Live',1800);
   fetchLogs();
@@ -677,6 +682,12 @@ function togglePause(){
   PAUSED=!PAUSED;
   document.getElementById('pause-btn').innerText=PAUSED?'Resume':'Pause';
   if(!PAUSED) renderLogs();
+}
+async function copyLogs(){
+  const text=document.getElementById('live-logs').innerText||'';
+  if(!text){ alert('No logs to copy'); return; }
+  try{ await navigator.clipboard.writeText(text); alert('Visible logs copied'); }
+  catch(e){ prompt('Copy logs:', text.slice(0,4000)); }
 }
 function _refreshFilterOptions(){
   const svc=document.getElementById('f-service'), err=document.getElementById('f-error');
@@ -981,6 +992,7 @@ function showIncidentTable(){
 }
 async function openIncident(incident_id){
   const meta=(INCIDENTS||[]).find(c=>c.incident_id===incident_id);
+  LAST_INCIDENT=incident_id;
   document.getElementById('incidents-table-wrap').style.display='none';
   document.getElementById('incident-workspace').style.display='block';
   setCrumbs([['Home',()=>go('home')],['Incidents',()=>{go('incidents');}],[incident_id,null]]);
@@ -1089,6 +1101,10 @@ function renderBlast(data){
   el.innerText=parts.join(' · ')||JSON.stringify(b);
 }
 function renderRcExtras(data){
+  if((!data.error_domain||data.error_domain==='Unknown')&&TAX&&TAX.categories&&data.root_cause_category){
+    const t=TAX.categories[data.root_cause_category];
+    if(t){ data.error_domain=t.domain; data.error_subcategory=t.subcategory; }
+  }
   const dom=document.getElementById('rc-domain');
   if(dom) dom.innerHTML=`<strong>Domain:</strong> ${esc(data.error_domain||'Unknown')} · <strong>Subcategory:</strong> ${esc(data.error_subcategory||'Unknown')} · <strong>Source:</strong> ${esc(data.evidence_source||'live')}`;
   const why=document.getElementById('rc-why');
@@ -2504,6 +2520,14 @@ def _scenario_for_file(name: str):
 def _incident_cards():
     """Static fixtures merged with lifecycle registry (compat loader, Part 34)."""
     from tools.error_taxonomy import domain_for_scenario
+    from projects.store import PRRegistry
+    try:
+        _prs = PRRegistry().list()
+    except Exception:
+        _prs = []
+    def _pr_for(incident_id):
+        matches = [r for r in _prs if r.incident_id == incident_id]
+        return matches[0] if matches else None
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cards = []
     for path in sorted(glob.glob(os.path.join(base_dir, "data", "incidents", "incident_00*.json"))):
@@ -2517,6 +2541,8 @@ def _incident_cards():
         service = data.get("service_name", "")
         rec = _registry().get(data.get("incident_id", ""))
         project_id = (rec or {}).get("project_id") or _projects().resolve_project(service)
+        runs = (rec or {}).get("rca_runs", [])
+        pr = _pr_for(data.get("incident_id", ""))
         cards.append({
             "incident_id": data.get("incident_id", os.path.basename(path)),
             "file": os.path.basename(path),
@@ -2527,9 +2553,15 @@ def _incident_cards():
             "project_id": project_id,
             "domain": domain, "subcategory": sub,
             "start_time": data.get("start_time", ""),
+            "rca_runs": runs,
+            "root_cause": (runs[-1].get("category", "") if runs else ""),
+            "pr_id": pr.pr_id if pr else "",
+            "pr_status": pr.status if pr else "",
         })
     for rec in _registry().list():
         if not any(c["incident_id"] == rec["incident_id"] for c in cards):
+            runs = rec.get("rca_runs", [])
+            pr = _pr_for(rec["incident_id"])
             cards.append({
                 "incident_id": rec["incident_id"], "file": "",
                 "title": rec.get("title", ""), "service": (rec.get("services") or [""])[0],
@@ -2537,6 +2569,10 @@ def _incident_cards():
                 "project_id": rec.get("project_id", "unassigned"),
                 "domain": rec.get("error_domain", ""), "subcategory": rec.get("error_subcategory", ""),
                 "start_time": rec.get("started_at", ""),
+                "rca_runs": runs,
+                "root_cause": (runs[-1].get("category", "") if runs else ""),
+                "pr_id": pr.pr_id if pr else "",
+                "pr_status": pr.status if pr else "",
             })
     return cards
 
