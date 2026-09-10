@@ -75,30 +75,53 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <title>Google Cloud Incident Investigation & RCA Agent</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        :root { --bg-dark:#050505; --card-bg:#0d0d0d; --surface:#151515; --accent-cyan:#d9d9d9; --accent-purple:#8a8a8a; --accent-red:#f0f0f0; --accent-green:#ffffff; --accent-yellow:#b5b5b5; --text-main:#ffffff; --text-muted:#a6a6a6; --text-faint:#6f6f6f; --border-color:#2a2a2a; --hover:#1c1c1c; --selected:#262626; }
-        *{box-sizing:border-box;margin:0;padding:0} body{font-family:'Inter',sans-serif;background:var(--bg-dark);color:var(--text-main);display:flex;min-height:100vh}
-        .sidebar{width:320px;background:#0a0a0a;border-right:1px solid var(--border-color);padding:24px;display:flex;flex-direction:column;gap:16px;overflow-y:auto}
+        :root { --bg-dark:#111315; --card-bg:#191c20; --surface:#191c20; --surface-secondary:#20242a; --accent-cyan:#d9d9d9; --accent-purple:#8a8a8a; --accent-red:#f0f0f0; --accent-green:#ffffff; --accent-yellow:#b5b5b5; --text-main:#f3f4f6; --text-muted:#a9afb7; --text-faint:#6f6f6f; --border-color:#30353c; --hover:#1c1c1c; --selected:#262626; --background:#111315; --success:#3d9a50; --warning:#b98a2f; --danger:#c0564d; --terminal-background:#000000; --sidebar-width:272px; --sidebar-collapsed-width:72px; --header-h:60px; --sp1:4px; --sp2:8px; --sp3:12px; --sp4:16px; --sp6:24px; --sp8:32px; }
+        *{box-sizing:border-box;margin:0;padding:0} body{font-family:'Inter',sans-serif;background:var(--bg-dark);color:var(--text-main);min-height:100vh;margin:0;display:grid;grid-template-rows:auto minmax(0,1fr)}
+        .sidebar{background:#151517;border-right:1px solid var(--border-color);padding:20px 16px;display:flex;flex-direction:column;gap:16px;position:sticky;top:var(--header-h);max-height:calc(100vh - var(--header-h));overflow-y:auto;overflow-x:hidden}
+        #app{display:grid;grid-template-columns:var(--sidebar-width) minmax(0,1fr);min-height:0;align-items:start}
+        body.sidebar-collapsed #app{grid-template-columns:var(--sidebar-collapsed-width) minmax(0,1fr)}
+        body.sidebar-collapsed .sidebar .lbl,body.sidebar-collapsed .sidebar .side-h span.txt,body.sidebar-collapsed #approval-zone,body.sidebar-collapsed .sidebar h2 .brand-txt{display:none}
+        body.sidebar-collapsed .sidebar{padding:20px 10px}
+        body.sidebar-collapsed .side-link,body.sidebar-collapsed .proj-row{justify-content:center}
+        #backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80}
+        body.drawer-open #backdrop{display:block}
         .sidebar h2{font-size:1.15rem;color:var(--accent-cyan)}
         .incident-card{background:var(--card-bg);border:1px solid var(--border-color);padding:12px 14px;border-radius:8px;cursor:pointer;transition:.2s}
         .incident-card:hover,.incident-card.active{border-color:var(--accent-cyan);transform:translateY(-2px);box-shadow:0 4px 14px rgba(255,255,255,.08)}
         .incident-card h4{font-size:.88rem;margin-bottom:4px} .incident-card p{font-size:.75rem;color:var(--text-muted)}
-        .main-content{flex:1;min-width:0;padding:24px 32px;overflow-y:auto;overflow-x:hidden}
+        .main-content{min-width:0;width:100%;overflow-x:hidden}
         .card,.item-box,.evidence-box,.log-panel{min-width:0;overflow-wrap:anywhere}
+        .card{padding:16px 20px}
+        .projects-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+        body{font-size:14px}
+        .card-title{font-size:16px}
         pre{max-width:100%;overflow-x:auto}
-        @media (max-width: 900px){
-            body{flex-direction:column}
-            .sidebar{width:100%;max-height:38vh;border-right:none;border-bottom:1px solid var(--border-color)}
-            .main-content{padding:14px 12px}
+        @media (max-width: 1279px){:root{--sidebar-width:232px}}
+        @media (max-width: 1023px){
+            #app{grid-template-columns:var(--sidebar-collapsed-width) minmax(0,1fr)}
+            .sidebar{padding:20px 10px}
+            .sidebar .lbl,.sidebar .side-h span.txt,.sidebar h2 .brand-txt,#approval-zone{display:none}
+            .side-link,.proj-row{justify-content:center}
+            .view.active{padding:20px 20px}
+        }
+        @media (max-width: 767px){
+            #app{grid-template-columns:minmax(0,1fr)}
+            .sidebar{position:fixed;left:0;top:var(--header-h);bottom:0;width:min(85vw,320px);max-height:none;z-index:90;transform:translateX(-105%);transition:transform .2s ease}
+            body.drawer-open .sidebar{transform:none}
             .grid{grid-template-columns:1fr}
             .header{flex-direction:column;align-items:flex-start}
             .log-panel{height:200px}
+            .view.active{padding:14px 12px}
         }
         .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border-color);flex-wrap:wrap;gap:12px}
-        .btn{background:linear-gradient(180deg,#2e2e2e,#101010);color:#fff;border:1px solid #3a3a3a;padding:10px 18px;border-radius:6px;font-weight:600;cursor:pointer}
+        .btn{background:linear-gradient(180deg,#2e2e2e,#101010);color:#fff;border:1px solid #3a3a3a;padding:10px 18px;border-radius:6px;font-weight:600;font-size:.85rem;min-height:38px;cursor:pointer}
+        .btn:hover{border-color:#6a6a6a}
+        .btn-primary{background:linear-gradient(180deg,#4a4a4a,#1c1c1c);border-color:#6f6f6f}
         .btn:disabled{opacity:.5;cursor:not-allowed} .btn-red{background:linear-gradient(180deg,#2e2e2e,#101010);border:1px solid #4a4a4a} .btn-green{background:linear-gradient(180deg,#3d3d3d,#161616);border:1px solid #6a6a6a}
         .sim-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;padding:14px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:10px;align-items:center}
         .sim-bar strong{font-size:.85rem;color:var(--accent-cyan);margin-right:4px}
-        .sim-btn{padding:7px 12px;border-radius:6px;border:1px solid var(--border-color);background:#101010;color:var(--text-main);font-size:.78rem;font-weight:600;cursor:pointer}
+        .sim-btn{padding:9px 14px;border-radius:6px;border:1px solid var(--border-color);background:#20242a;color:var(--text-main);font-size:.82rem;font-weight:600;cursor:pointer;min-height:36px}
+        .sim-btn:disabled{opacity:.5;cursor:not-allowed}
         .sim-btn:hover{border-color:#d9d9d9;background:#1c1c1c}
         .log-panel{background:#000000;border:1px solid var(--border-color);border-radius:8px;padding:12px;height:260px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.5}
         .log-line{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.07)} .log-error{color:#ffffff;font-weight:700} .log-warn{color:#b5b5b5;font-weight:600} .log-info{color:var(--text-muted)}
@@ -109,24 +132,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .badge-red{background:#1a1a1a;color:#ffffff;border:2px solid #8a8a8a}
         .badge-yellow{background:#141414;color:#b5b5b5;border:1px solid #4a4a4a}
         .badge-green{background:#1a1a1a;color:#ffffff;border:1px solid #8a8a8a}
-        .item-box{background:#101010;border-left:4px solid var(--accent-cyan);padding:10px 14px;margin-bottom:8px;border-radius:0 6px 6px 0;font-size:.88rem}
-        .evidence-box{background:#101010;border:1px solid var(--border-color);padding:10px 14px;border-radius:6px;margin-bottom:8px;font-size:.85rem}
+        .item-box{background:#20242a;border-left:4px solid var(--accent-cyan);padding:10px 14px;margin-bottom:8px;border-radius:0 6px 6px 0;font-size:.88rem}
+        .evidence-box{background:#20242a;border:1px solid var(--border-color);padding:10px 14px;border-radius:6px;margin-bottom:8px;font-size:.85rem}
         .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px} .dot-green{background:#ffffff;box-shadow:0 0 6px rgba(255,255,255,.6)} .dot-red{background:#9a9a9a;animation:pulse 1.2s infinite}
         @keyframes pulse{0%{opacity:1}50%{opacity:.4}100%{opacity:1}}
             button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #d9d9d9;outline-offset:1px}
     
-        :root{--background:#050505;--surface:#0d0d0d;--surface-secondary:#151515;--border:#2a2a2a;--text-primary:#ffffff;--text-secondary:#a6a6a6;--accent:#d9d9d9;--success:#3d9a50;--warning:#b98a2f;--danger:#c0564d;--terminal-background:#000000}
-        #topnav{display:flex;gap:6px;align-items:center;padding:10px 16px;background:#0a0a0a;border-bottom:1px solid var(--border-color);position:sticky;top:0;z-index:50}
-        .view h1{font-size:1.5rem;margin:2px 0 6px;line-height:1.2}
-        #crumbs{margin:0 0 10px;min-height:1.2em}
+        #topnav{display:flex;gap:6px;align-items:center;height:var(--header-h);box-sizing:border-box;padding:0 16px;background:#151517;border-bottom:1px solid var(--border-color);z-index:50}
+        #topnav .nav-right{margin-left:auto;display:flex;gap:6px;align-items:center}
+        #topnav .hamb{background:transparent;border:1px solid var(--border-color);border-radius:6px;color:var(--text-main);font-size:1rem;padding:6px 10px;cursor:pointer}
+        .view.active{width:100%;max-width:1600px;margin:0 auto;padding:24px 32px;box-sizing:border-box}
+        .view h1{font-size:1.75rem;margin:2px 0 6px;line-height:1.25}
+        #crumbs{margin:0 0 10px;min-height:1.2em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         #view-projects>div:first-child{flex-wrap:wrap;row-gap:8px}
-        .view{min-width:0}
         #topnav .brand{font-weight:700;margin-right:12px;white-space:nowrap}
         .nav-btn{padding:7px 12px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text-muted);font-size:.82rem;font-weight:600;cursor:pointer}
         .nav-btn:hover{background:#1c1c1c;color:#fff}
         .nav-btn.active{background:#262626;color:#fff;border:1px solid #4a4a4a}
-        #app{display:flex;flex:1;min-height:0}
-        .view{display:none}
+        #app{min-height:0}
+        .view{display:none;min-width:0}
         .view.active{display:block}
         #crumbs{font-size:.78rem;color:var(--text-muted);margin-bottom:12px}
         #crumbs a{color:var(--text-secondary);cursor:pointer;text-decoration:underline}
@@ -146,7 +170,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .pill.warn{border-color:var(--warning);color:#efdfb5}
         .pill.info{border-color:#4a4a4a;color:#d9d9d9}
         .stepper{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
-        .step{flex:1;min-width:110px;background:#101010;border:1px solid var(--border-color);border-radius:8px;padding:8px 10px;font-size:.74rem;cursor:pointer}
+        .step{flex:1;min-width:110px;background:#20242a;border:1px solid var(--border-color);border-radius:8px;padding:8px 10px;font-size:.74rem;cursor:pointer}
         .step.done{border-left:3px solid var(--success)}
         .step.run{border-left:3px solid var(--warning)}
         .step.fail{border-left:3px solid var(--danger)}
@@ -155,18 +179,26 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .step .s{color:var(--text-muted);font-size:.7rem}
         .modal-veil{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:100;padding:16px}
         .modal-veil.open{display:flex}
-        .modal{background:#101010;border:1px solid #4a4a4a;border-radius:12px;max-width:640px;width:100%;max-height:88vh;overflow-y:auto;padding:22px}
+        .modal{background:#20242a;border:1px solid #4a4a4a;border-radius:12px;max-width:640px;width:100%;max-height:88vh;overflow-y:auto;padding:22px}
         .modal input,.modal select,.modal textarea{width:100%;background:#000;border:1px solid var(--border-color);border-radius:6px;color:#fff;padding:8px 10px;margin:4px 0 10px;font-size:.85rem}
         .modal label{font-size:.78rem;color:var(--text-muted)}
         .wiz-steps{display:flex;gap:6px;margin-bottom:14px}
         .wiz-steps span{flex:1;text-align:center;font-size:.7rem;padding:6px;border-radius:6px;background:#141414;color:var(--text-muted)}
         .wiz-steps span.on{background:#262626;color:#fff;border:1px solid #4a4a4a}
         .tabs{display:flex;gap:6px;margin:12px 0;flex-wrap:wrap}
-        .tabs button{padding:7px 12px;border-radius:6px;border:1px solid var(--border-color);background:#101010;color:var(--text-muted);cursor:pointer;font-size:.8rem}
+        .tabs button{padding:7px 12px;border-radius:6px;border:1px solid var(--border-color);background:#20242a;color:var(--text-muted);cursor:pointer;font-size:.8rem}
         .tabs button.on{background:#262626;color:#fff;border-color:#4a4a4a}
         .skeleton{background:linear-gradient(90deg,#141414,#1e1e1e,#141414);border-radius:6px;min-height:18px;margin:6px 0;animation:sk 1.4s infinite}
         .side-h{font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin:0 0 6px}
         .side-link{width:100%;text-align:left;justify-content:flex-start}
+        .proj-row{display:flex;gap:8px;align-items:center;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:6px;color:var(--text-main);padding:7px 10px;font-size:.8rem;font-weight:600;cursor:pointer;box-sizing:border-box}
+        .proj-row:hover{background:#1c1c1c}
+        .proj-row.sel{background:linear-gradient(180deg,#232323,#141414);border-color:#4a4a4a;border-left:3px solid #d9d9d9}
+        .proj-row .meta{font-size:.7rem;color:var(--text-muted);font-weight:400}
+        .side-link .ic,.proj-row .ic{width:16px;text-align:center;flex:none}
+        #approval-box details.appr{margin-bottom:6px}
+        #approval-box details.appr summary{cursor:pointer;list-style:none}
+        #approval-box details.appr summary::-webkit-details-marker{display:none}
         #app.collapsed .sidebar{display:none}
         @keyframes sk{0%{opacity:.5}50%{opacity:1}100%{opacity:.5}}
         .metric-chip{background:#000;border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;font-size:.78rem}
@@ -180,56 +212,62 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .timeline div{margin-bottom:10px;font-size:.8rem}
         .timeline .ts{color:var(--text-muted);font-size:.72rem}
         a{color:#d9d9d9}
-        [data-theme="light"]{--bg-dark:#f2f2f2;--card-bg:#ffffff;--text-main:#111111;--text-muted:#555555;--border-color:#dddddd;--accent-cyan:#333333}
-        [data-theme="light"] body{background:#f2f2f2;color:#111}
-        [data-theme="light"] .sidebar,[data-theme="light"] #topnav{background:#ffffff;border-color:#dddddd}
-        [data-theme="light"] .card,[data-theme="light"] .stat-card,[data-theme="light"] .modal,[data-theme="light"] details.sim-group{background:#ffffff;border-color:#dddddd}
-        [data-theme="light"] .item-box,[data-theme="light"] .evidence-box,[data-theme="light"] .log-panel,[data-theme="light"] pre,[data-theme="light"] #log-summary,[data-theme="light"] .step{background:#f7f7f7;border-color:#dddddd;color:#111}
-        [data-theme="light"] .sim-btn,[data-theme="light"] select,[data-theme="light"] input,[data-theme="light"] .tabs button{background:#fff;border-color:#ccc;color:#111}
-        [data-theme="light"] .log-error{color:#111}
+        [data-theme="light"]{--bg-dark:#f5f6f8;--card-bg:#ffffff;--surface:#ffffff;--surface-secondary:#f0f2f5;--text-main:#15171a;--text-muted:#61666d;--border-color:#dde1e6;--accent-cyan:#333333;--accent-purple:#6b7280;--accent-red:#9c2f28;--accent-green:#1e6b34;--accent-yellow:#8a6d1c}
+        [data-theme="light"] body{background:linear-gradient(135deg,#f7f8fa 0%,#f2f4f7 100%);color:#15171a}
+        [data-theme="light"] .sidebar{background:#ffffff;border-color:#dde1e6}
+        [data-theme="light"] #topnav{background:rgba(255,255,255,.92);border-color:#dde1e6}
+        [data-theme="light"] .card,[data-theme="light"] .stat-card,[data-theme="light"] .modal,[data-theme="light"] details.sim-group{background:#ffffff;border-color:#dde1e6;box-shadow:0 1px 3px rgba(20,22,26,.06)}
+        [data-theme="light"] .item-box,[data-theme="light"] .evidence-box,[data-theme="light"] pre,[data-theme="light"] #log-summary,[data-theme="light"] .step{background:#f0f2f5;border-color:#dde1e6;color:#15171a}
+        [data-theme="light"] .log-panel{background:#0d1117;border-color:#dde1e6}
+        [data-theme="light"] .sim-btn,[data-theme="light"] select,[data-theme="light"] input,[data-theme="light"] .tabs button,[data-theme="light"] .nav-btn{background:#fff;border-color:#c9ced4;color:#15171a}
+        [data-theme="light"] .nav-btn.active{background:#e8ebef;border-color:#b9bfc7;color:#111}
+        [data-theme="light"] .log-error{color:#fff}
+        [data-theme="light"] .log-warn{color:#d6d6d6}
         [data-theme="light"] table.tbl th,[data-theme="light"] table.tbl td{border-color:#e2e2e2}
-        [data-theme="light"] a{color:#222}
-        @media (max-width: 900px){#app{flex-direction:column}#topnav{flex-wrap:wrap}.cards{grid-template-columns:repeat(2,1fr)}}
+        [data-theme="light"] a{color:#333}
+        [data-theme="light"] .proj-row.sel{background:linear-gradient(180deg,#eceff3,#e2e6eb);border-color:#b9bfc7}
+        [data-theme="light"] .badge{background:#f0f2f5;border-color:#c9ced4;color:#333}
+        @media (max-width: 900px){#topnav{flex-wrap:wrap}.cards{grid-template-columns:repeat(2,1fr)}}
 
     </style>
 </head>
 <body>
 <nav id="topnav" aria-label="Primary">
+  <button class="hamb" onclick="toggleSidebar()" aria-label="Toggle navigation" aria-expanded="true" title="Toggle sidebar">☰</button>
   <span class="brand">◼ Cloud RCA Agent</span>
   <button class="nav-btn" data-view="home" onclick="go('home')" title="Home">⌂ Home</button>
   <button class="nav-btn" data-view="projects" onclick="go('projects')">Projects</button>
   <button class="nav-btn" data-view="incidents" onclick="go('incidents')">Incidents</button>
   <button class="nav-btn" data-view="prs" onclick="go('prs')">Pull Requests</button>
   <button class="nav-btn" data-view="analyze" onclick="go('analyze')">Analyze</button>
-  <button class="nav-btn" data-view="settings" onclick="go('settings')">Settings</button>
-  <span style="flex:1"></span>
-  <span id="build-stamp" title="Deployed build" style="font-size:.68rem;color:var(--text-muted)"></span>
-  <button class="nav-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle dark / light theme">◐ Theme</button>
+  <span class="nav-right">
+    <button class="nav-btn" data-view="settings" onclick="go('settings')">Settings</button>
+    <button class="nav-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle dark / light theme">◐ Theme</button>
+    <span title="Signed in operator" style="font-size:.78rem;color:var(--text-muted);white-space:nowrap">◉ operator</span>
+  </span>
 </nav>
 <div id="app">
+<div id="backdrop" onclick="document.body.classList.remove('drawer-open')" aria-hidden="true"></div>
     <div class="sidebar">
-        <div style="display:flex;align-items:center;gap:8px">
-            <h2 style="flex:1">◼ Cloud RCA Agent</h2>
-            <button class="sim-btn" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar">☰</button>
-        </div>
-        <div><p class="side-h">Projects</p><div id="side-projects">Loading…</div></div>
-        <div><p class="side-h">Operations</p>
+        <div><p class="side-h"><span class="txt">Projects</span></p><div id="side-projects">Loading…</div></div>
+        <div><p class="side-h"><span class="txt">Operations</span></p>
             <div style="display:flex;flex-direction:column;gap:6px">
-            <button class="sim-btn side-link" onclick="go('incidents')">Active Incidents</button>
-            <button class="sim-btn side-link" onclick="go('prs')">Pull Requests</button>
-            <button class="sim-btn side-link" onclick="go('analyze')">Analyze Logs</button>
+            <button class="sim-btn side-link" onclick="go('incidents')" title="Active Incidents"><span class="ic" aria-hidden="true">◉</span><span class="lbl">Active Incidents</span></button>
+            <button class="sim-btn side-link" onclick="go('prs')" title="Pull Requests"><span class="ic" aria-hidden="true">⎇</span><span class="lbl">Pull Requests</span></button>
+            <button class="sim-btn side-link" onclick="go('analyze')" title="Analyze Logs"><span class="ic" aria-hidden="true">≡</span><span class="lbl">Analyze Logs</span></button>
             </div>
         </div>
-        <div><p class="side-h">Administration</p>
+        <div><p class="side-h"><span class="txt">Administration</span></p>
             <div style="display:flex;flex-direction:column;gap:6px">
-            <button class="sim-btn side-link" onclick="openOnboard()">+ Onboard Project</button>
-            <button class="sim-btn side-link" onclick="go('settings')">Settings</button>
+            <button class="sim-btn side-link" onclick="openOnboard()" title="Onboard Project"><span class="ic" aria-hidden="true">+</span><span class="lbl">Onboard Project</span></button>
+            <button class="sim-btn side-link" onclick="go('settings')" title="Settings"><span class="ic" aria-hidden="true">⚙</span><span class="lbl">Settings</span></button>
             </div>
         </div>
-        <div style="margin-top:8px;padding-top:12px;border-top:1px solid var(--border-color)">
-            <p class="side-h">Approval Center</p>
+        <div id="approval-zone" style="margin-top:8px;padding-top:12px;border-top:1px solid var(--border-color)">
+            <p class="side-h"><span class="txt">Approval Center</span></p>
             <div id="approval-box" style="font-size:.78rem;color:var(--text-muted)">No pending approvals</div>
         </div>
+        <div style="margin-top:auto;padding-top:8px;font-size:.68rem;color:var(--text-muted)"><span id="build-stamp" title="Deployed build"></span></div>
     </div>
     <div class="main-content">
 <div id="crumbs" aria-label="Breadcrumb"></div>
@@ -274,7 +312,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
   <div class="card">
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
-      <input id="inc-search" oninput="renderIncidentTable()" placeholder="Search id, error, service, trace…" style="flex:1;min-width:180px;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px" />
+      <input id="inc-search" oninput="renderIncidentTable()" placeholder="Search id, error, service, trace…" style="flex:1;min-width:180px;background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px" />
       <select id="inc-filter-sev" onchange="renderIncidentTable()"><option value="">All severities</option><option>P1</option><option>P2</option><option>P3</option></select>
       <select id="inc-filter-status" onchange="renderIncidentTable()"><option value="">All statuses</option><option>Open</option><option>Investigating</option><option>Resolved</option></select>
       <span id="inc-count" style="font-size:.78rem;color:var(--text-muted)"></span>
@@ -339,11 +377,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
                 <div id="log-summary" style="display:flex;flex-wrap:wrap;gap:14px;font-size:.78rem;color:var(--text-muted);margin-bottom:8px;padding:8px 10px;background:#000000;border:1px solid var(--border-color);border-radius:6px">No data yet — simulate an incident.</div>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;font-size:.78rem">
-                    <select id="f-service" onchange="renderLogs()" style="background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All services</option></select>
-                    <select id="f-severity" onchange="renderLogs()" style="background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All severities</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select>
-                    <select id="f-error" onchange="renderLogs()" style="background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px;max-width:220px"><option value="">All error types</option></select>
-                    <input id="f-trace" oninput="renderLogs()" placeholder="trace id…" style="background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem;width:150px" />
-                    <input id="f-search" oninput="renderLogs()" placeholder="search logs…" style="flex:1;min-width:140px;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem" />
+                    <select id="f-service" onchange="renderLogs()" style="background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All services</option></select>
+                    <select id="f-severity" onchange="renderLogs()" style="background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All severities</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select>
+                    <select id="f-error" onchange="renderLogs()" style="background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px;max-width:220px"><option value="">All error types</option></select>
+                    <input id="f-trace" oninput="renderLogs()" placeholder="trace id…" style="background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem;width:150px" />
+                    <input id="f-search" oninput="renderLogs()" placeholder="search logs…" style="flex:1;min-width:140px;background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem" />
                 </div>
                 <div id="live-logs" class="log-panel" aria-label="Live logs terminal">Waiting for simulated errors... Click any button above.</div>
                 <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -392,7 +430,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div id="cf-preflight" style="font-size:.76rem;color:var(--text-muted);margin:8px 0"></div>
                     <div id="cf-lifecycle" style="font-size:.8rem;color:var(--text-muted);margin:8px 0"></div>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
-                        <input id="cf-msg" placeholder="approval note (optional)…" style="flex:1;min-width:180px;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:7px 10px;font-size:.8rem" />
+                        <input id="cf-msg" placeholder="approval note (optional)…" style="flex:1;min-width:180px;background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:7px 10px;font-size:.8rem" />
                         <button class="btn btn-green" id="cf-approve-btn" onclick="approveFixPR()">Approve &amp; Create PR</button>
                         <button class="btn btn-red" onclick="rejectFix()">Reject</button>
                         <button class="sim-btn" onclick="generateFix(true)">Generate Fix</button>
@@ -409,7 +447,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="grid">
                 <div class="card"><div class="card-title">RCA Runs</div><div id="rca-runs"><span style="font-size:.8rem;color:var(--text-muted)">No runs yet.</span></div></div>
                 <div class="card"><div class="card-title">Incident Notes</div><div id="notes-list"></div>
-                    <div style="display:flex;gap:6px;margin-top:8px"><input id="note-input" placeholder="Add a note…" aria-label="Add incident note" style="flex:1;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px" /><button class="sim-btn" onclick="addNote()">Add</button></div>
+                    <div style="display:flex;gap:6px;margin-top:8px"><input id="note-input" placeholder="Add a note…" aria-label="Add incident note" style="flex:1;background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px" /><button class="sim-btn" onclick="addNote()">Add</button></div>
                 </div>
             </div>
         </div>
@@ -448,14 +486,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
         <div id="view-projects" class="view">
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-                <h1 style="flex:1">Projects</h1>
-                <button class="sim-btn" onclick="openOnboard()">+ Onboard Project</button>
+            <h1>Projects</h1>
+            <p style="color:var(--text-muted);font-size:.85rem;margin:0 0 12px">Manage services and repositories monitored by Cloud RCA Agent.</p>
+            <div class="page-header-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+                <button class="btn btn-primary" onclick="openOnboard()">+ Onboard Project</button>
                 <button class="sim-btn" onclick="openOnboard('repo')">Connect Git Repository</button>
                 <button class="sim-btn" onclick="openOnboard('cloud')">Add Google Cloud Project</button>
-                <button class="sim-btn" onclick="go('analyze')">Upload Logs for RCA</button>
             </div>
-            <div id="projects-list" class="cards"><div class="skeleton"></div></div>
+            <div style="margin-bottom:16px"><button class="sim-btn" onclick="go('analyze')">Upload Logs for RCA</button></div>
+            <div id="projects-list" class="cards projects-grid"><div class="skeleton"></div></div>
             <div id="project-detail"></div>
         </div>
         <div id="view-prs" class="view">
@@ -546,11 +585,13 @@ async function simulate(scenario){
 }
 async function clearLogs(){ await fetch('/api/logs/clear',{method:'POST'}); document.getElementById('live-logs').innerHTML='Logs cleared. Ready for new simulation.'; liveIncidentFile=null; }
 let _pollInFlight=false, _lastLogSig='', _lastApprSig='';
-function _approvalCard(a, accent){
+function _approvalCard(a, accent, open){
   const border=accent?'var(--accent-cyan)':'var(--border-color)';
   const pad=accent?'4px 10px':'2px 8px';
   const ptype=a.action_type==='CODE_CHANGE'?'Code Change':'Infrastructure Change';
-  return `<div style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><span class="pill warn">• PENDING</span> <span class="pill info">${ptype}</span> <strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}<br/><input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#101010;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:${pad};border-radius:4px;background:linear-gradient(180deg,#3d3d3d,#161616);border:1px solid #6f6f6f;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:${pad};border-radius:4px;background:linear-gradient(180deg,#232323,#0d0d0d);border:1px solid #4a4a4a;color:#fff;cursor:pointer">Reject</button></div></div>`;
+  const head=`<span class="pill warn">• PENDING</span> <span class="pill info">${ptype}</span> <strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}`;
+  const form=`<input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#20242a;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:${pad};border-radius:4px;background:linear-gradient(180deg,#3d3d3d,#161616);border:1px solid #6f6f6f;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:${pad};border-radius:4px;background:linear-gradient(180deg,#232323,#0d0d0d);border:1px solid #4a4a4a;color:#fff;cursor:pointer">Reject</button></div>`;
+  return `<details class="appr"${open?' open':''} style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><summary style="cursor:pointer;font-size:.76rem;color:var(--text-muted)">${head}</summary><div style="margin-top:6px">${form}</div></details>`;
 }
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function _historyCard(a){
@@ -559,9 +600,11 @@ function _historyCard(a){
   const when=String(a.decided_at||'').replace('T',' ').slice(0,19);
   const note=a.decided_message?`<div style="margin-top:4px;font-style:italic;color:var(--text-main)">Note: ${esc(a.decided_message)}</div>`:'';
   const by=a.decided_by?`<div>By ${esc(a.decided_by)} at ${esc(when)}</div>`:'';
+  const type=a.action_type==='CODE_CHANGE'?'Code Change':'Infrastructure Change';
+  const icon=st==='APPROVED'?'\u2713':(st==='REJECTED'?'\u2715':(st==='PENDING'?'\u2022':'!'));
   const execBtn=(st==='APPROVED'&&['cloud_run_rollback','cloud_run_shift_traffic','cloud_run_scale_within_limits'].includes(a.action))
     ? `<div style="margin-top:6px"><button onclick="executeInfra('${a.approval_id}','${esc(a.action)}')" style="padding:2px 8px;border-radius:4px;background:linear-gradient(180deg,#2e2e2e,#101010);border:1px solid #555555;color:#fff;cursor:pointer">Execute &amp; Verify</button></div><div id="exec-${a.approval_id}" style="margin-top:6px"></div>`:'';
-  return `<div style="padding:6px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:6px;margin-bottom:6px;font-size:.76rem;color:var(--text-muted)"><span style="color:${color};font-weight:700">${esc(st)}</span> <strong style="color:var(--text-main)">${esc(a.action)}</strong> ${esc(a.incident_id)}<br/>Risk ${esc(a.risk)}${by}${note}${execBtn}</div>`;
+  return `<div style="padding:6px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:6px;margin-bottom:6px;font-size:.76rem;color:var(--text-muted)"><span class="pill ${st==='APPROVED'?'ok':(st==='REJECTED'?'bad':'warn')}">${icon} ${esc(st)}</span> <span class="pill info">${type}</span> <strong style="color:var(--text-main)">${esc(a.action)}</strong> ${esc(a.incident_id)}<br/>Risk ${esc(a.risk)}${by}${note}${execBtn}</div>`;
 }
 async function executeInfra(id, action){
   const box=document.getElementById('exec-'+id);
@@ -580,7 +623,7 @@ async function executeInfra(id, action){
     if(!opts.length){ show('No previous revisions found in incident evidence.'); return; }
     const selId='rollback-sel-'+id;
     show(`<div style="margin-bottom:6px">Roll back <strong>${esc(current||'current')}</strong> to:</div>`+
-      `<select id="${selId}" style="width:100%;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:6px 8px;font-size:.78rem">`+
+      `<select id="${selId}" style="width:100%;background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:6px 8px;font-size:.78rem">`+
       opts.map(r=>`<option value="${esc(r.revision_name)}"${r.revision_name===suggested?' selected':''}>${esc(r.revision_name)}${r.deployed_at?' — '+esc(r.deployed_at):''}${r.traffic_percent!==''?' — '+esc(String(r.traffic_percent))+'% traffic':''}</option>`).join('')+
       `</select><div style="color:var(--text-muted)">Suggested: ${esc(suggested||opts[0].revision_name)} (newest non-current; current revision disabled)</div>`+
       `<div style="margin-top:6px"><button onclick="doExecuteInfra('${id}','${action}',{target_revision:document.getElementById('${selId}').value})" style="padding:2px 10px;border-radius:4px;background:linear-gradient(180deg,#232323,#0d0d0d);border:1px solid #4a4a4a;color:#fff;cursor:pointer">Run Rollback</button></div>`);
@@ -659,7 +702,7 @@ async function fetchLogs(){
         const ab=document.getElementById('approval-box');
         const prevIds=new Set([...document.querySelectorAll('.appr-msg')].map(el=>el.dataset.approvalId));
         let html='';
-        if(d.length){ html+= [...d].reverse().map(a=>_approvalCard(a,false)).join(''); }
+        if(d.length){ html+= [...d].reverse().map((a,i)=>_approvalCard(a,false,i===0)).join(''); }
         else{ html+='<div style="font-size:.78rem;color:var(--text-muted);margin-bottom:6px">No pending approvals</div>'; }
         if(h.length){ html+='<div style="font-size:.7rem;color:var(--text-muted);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.05em">Approval & Action History</div>'+h.map(a=>_historyCard(a)).join(''); }
         ab.innerHTML=html;
@@ -831,8 +874,10 @@ async function generateFix(regen){
     document.getElementById('cf-diff').innerHTML=colorDiff(p.patch);
     document.getElementById('cf-files').innerText=p.files_changed.join(', ')+' (+'+p.lines_added+' -'+p.lines_removed+')';
     document.getElementById('cf-meta').innerHTML=
+      `<div><strong>Repository:</strong> cloud-rca-demo-app (branch created on approve; main never touched)</div>`+
       `<div><strong>Reason:</strong> ${esc(p.reasoning_summary)}</div>`+
       `<div><strong>Risk:</strong> ${esc(p.risk)} · <strong>Tests:</strong> ${p.tests_to_run.map(esc).join(', ')}</div>`+
+      `<div><strong>Rollback strategy:</strong> close the PR unmerged and delete the fix branch</div>`+
       `<div><strong>Patch SHA256:</strong> <code>${esc(p.patch_sha256.slice(0,16))}…</code> (approval binds to full hash)</div>`;
     document.getElementById('cf-lifecycle').innerText='Status: '+data.fix_status+(data.approval?(' · Approval '+data.approval.approval_id+' '+data.approval.status):'');
     setCfBadge(data.fix_status);
@@ -877,7 +922,7 @@ async function refreshFixStatus(){
   setCfBadge(d.fix_status, good?true:(bad?false:undefined));
   document.getElementById('cf-lifecycle').innerText='Status: '+d.fix_status+(job.error?(' — '+job.error):'');
   const pr=document.getElementById('cf-pr');
-  if(job.pr_url){ pr.innerHTML=`<div class="item-box" style="border-left-color:var(--accent-green)"><strong>Branch:</strong> ${esc(job.branch||'')} · <strong>Commit:</strong> ${esc(job.commit||'')} · <strong>PR:</strong> #${job.pr_number||''} <a href="${esc(job.pr_url)}" target="_blank" style="color:var(--accent-cyan)">View Pull Request</a></div>`; }
+  if(job.pr_url){ const title=(d.proposal&&d.proposal.summary)||''; pr.innerHTML=`<div class="item-box" style="border-left-color:var(--accent-green)"><strong>Pull Request Created</strong><br/>PR #${job.pr_number||''} — ${esc(title)}<br/><strong>Branch:</strong> ${esc(job.branch||'')} · <strong>Commit:</strong> ${esc(job.commit||'')} <a href="${esc(job.pr_url)}" target="_blank" rel="noopener" style="color:var(--accent-cyan)">Open Pull Request</a></div>`; }
   else if(job.branch){ pr.innerHTML=`<div class="item-box"><strong>Branch:</strong> ${esc(job.branch)}${job.commit?(' · <strong>Commit:</strong> '+esc(job.commit)):''}</div>`; }
   else{ pr.innerHTML=''; }
   const t=document.getElementById('cf-tests');
@@ -911,7 +956,7 @@ function showView(view, arg1, arg2){
     el.classList.toggle('active',on);
     el.style.display=on?'block':'none';
   });
-  document.querySelectorAll('#topnav .nav-btn[data-view]').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
+  document.querySelectorAll('#topnav .nav-btn[data-view]').forEach(b=>{const on=b.dataset.view===view; b.classList.toggle('active', on); if(on){b.setAttribute('aria-current','page');}else{b.removeAttribute('aria-current');}});
   const names={home:'Home',projects:'Projects',incidents:'Incidents',prs:'Pull Requests',analyze:'Analyze Logs',settings:'Settings'};
   setCrumbs([['Home',()=>go('home')],[(names[view]||'Home'),null]]);
   if(view==='home') loadHome();
@@ -937,7 +982,30 @@ function initRouter(){
   }).catch(()=>{});
   syncFromHash();
 }
-function toggleSidebar(){ document.getElementById('app').classList.toggle('collapsed'); }
+function toggleSidebar(){
+  const btn=document.querySelector('#topnav .hamb');
+  if(window.innerWidth<768){
+    const open=document.body.classList.toggle('drawer-open');
+    if(btn) btn.setAttribute('aria-expanded',open?'true':'false');
+  }else{
+    const collapsed=document.body.classList.toggle('sidebar-collapsed');
+    if(btn) btn.setAttribute('aria-expanded',collapsed?'false':'true');
+  }
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&document.body.classList.contains('drawer-open')){
+    document.body.classList.remove('drawer-open');
+    const btn=document.querySelector('#topnav .hamb');
+    if(btn) btn.setAttribute('aria-expanded','false');
+  }
+});
+async function loadSideProjects(){
+  const box=document.getElementById('side-projects'); if(!box) return;
+  try{
+    const ps=await (await fetch('/api/projects')).json();
+    box.innerHTML=ps.length?ps.map(p=>`<button class="proj-row${p.project_id===CUR_PROJECT?' sel':''}" aria-current="${p.project_id===CUR_PROJECT?'true':'false'}" title="${esc(p.name)} (${esc(p.environment||'')})" onclick="openProject('${esc(p.project_id)}')"><span class="ic" aria-hidden="true">●</span><span class="lbl">${esc(p.name)}<br/><span class="meta">${esc(p.environment||'')} · ${p.open_incidents} incident(s)</span></span></button>`).join(''):'<p style="font-size:.75rem;color:var(--text-muted)">None</p>';
+  }catch(e){ box.innerHTML=''; }
+}
 async function loadTaxonomy(){
   try{ TAX=await (await fetch('/api/taxonomy')).json(); }catch(e){ TAX=null; }
 }
@@ -961,14 +1029,18 @@ function statusPill(st){
   return `<span class="pill info">• ${esc(s)}</span>`;
 }
 /* ---- incidents table ---- */
+let META_FAILED=false;
 async function loadIncidentMeta(){
   try{
-    const r=await fetch('/api/incidents/meta'); INCIDENTS=await r.json();
-  }catch(e){ INCIDENTS=[]; }
+    const r=await fetch('/api/incidents/meta');
+    if(!r.ok) throw 0;
+    INCIDENTS=await r.json(); META_FAILED=false;
+  }catch(e){ INCIDENTS=[]; META_FAILED=true; }
   renderIncidentTable();
 }
 function renderIncidentTable(){
   const body=document.getElementById('inc-table-body'); if(!body) return;
+  if(META_FAILED){ body.innerHTML='<tr><td colspan="7">Could not load incidents. <button class="sim-btn" onclick="loadIncidentMeta()">Retry</button></td></tr>'; return; }
   const q=(document.getElementById('inc-search').value||'').toLowerCase();
   const fs=document.getElementById('inc-filter-sev').value;
   const fst=document.getElementById('inc-filter-status').value;
@@ -1205,7 +1277,9 @@ function toggleTheme(){
 const EV_ICON={'INCIDENT_CREATED':'◉','SIMULATION_STARTED':'▲','RCA_STARTED':'◆','ROOT_CAUSE_IDENTIFIED':'✓','REMEDIATION_PROPOSED':'✎','APPROVAL_REQUESTED':'•','APPROVAL_APPROVED':'✓','APPROVAL_REJECTED':'✕','FIX_PROPOSED':'✎','FIX_APPROVED':'✓','FIX_REJECTED':'✕','FIX_APPLIED':'✓','PR_CREATED':'⎇','PR_FAILED':'!','LOG_COLLECTED':'≡','PROJECT_CREATED':'＋','STATUS_RESOLVED':'✓','INCIDENT_RESOLVED':'✓','EXECUTION':'▶','VERIFICATION':'✔'};
 async function loadHome(){
   try{
-    const s=await (await fetch('/api/home/stats')).json();
+    const r=await fetch('/api/home/stats');
+    if(!r.ok) throw 0;
+    const s=await r.json();
     const set=(id,v)=>{const e=document.getElementById(id); if(e) e.innerText=v;};
     set('hm-projects',s.projects); set('hm-incidents',s.open_incidents); set('hm-rca',s.rca_completed);
     set('hm-prs',s.prs_created); set('hm-approvals',s.pending_approvals);
@@ -1213,7 +1287,10 @@ async function loadHome(){
     if(act) act.innerHTML=(s.recent_activity||[]).length?s.recent_activity.map(e=>`<div style="font-size:.8rem;padding:4px 0;border-bottom:1px solid var(--border-color)">${esc(EV_ICON[e.event]||'•')} <strong>${esc(e.event)}</strong> ${esc(e.incident_id||'')} <span style="color:var(--text-muted)">${esc(e.description||'')} · ${esc(timeAgo(e.timestamp))}</span></div>`).join(''):'<span style="color:var(--text-muted)">No activity yet.</span>';
     const prs=document.getElementById('hm-recent-prs');
     if(prs) prs.innerHTML=(s.recent_prs||[]).length?s.recent_prs.map(p=>`<div style="font-size:.8rem;padding:4px 0"><button class="sim-btn" onclick="go('prs','${esc(p.pr_id)}')">PR #${p.pr_number||'?'}</button> <strong>${esc(p.title||'').slice(0,60)}</strong><br/><span style="color:var(--text-muted)">${esc(p.incident_id||'')} · ${esc(p.status||'')}</span></div>`).join(''):'<span style="color:var(--text-muted)">No agent PRs yet.</span>';
-  }catch(e){ /* home must never break boot */ }
+  }catch(e){
+    const act=document.getElementById('hm-activity');
+    if(act) act.innerHTML='<span style="color:var(--text-muted)">Could not load home data. <button class="sim-btn" onclick="loadHome()">Retry</button></span>';
+  }
 }
 /* ---- projects ---- */
 async function loadProjects(){
@@ -1229,15 +1306,10 @@ async function loadProjects(){
       :'<div class="card">No projects onboarded yet.</div>';
   }catch(e){ box.innerHTML='<div class="card">Failed to load projects. <button class="sim-btn" onclick="loadProjects()">Retry</button></div>'; }
 }
-async function loadSideProjects(){
-  const box=document.getElementById('side-projects'); if(!box) return;
-  try{
-    const ps=await (await fetch('/api/projects')).json();
-    box.innerHTML=ps.map(p=>`<div class="incident-card" onclick="openProject('${esc(p.project_id)}')"><h4>${esc(p.name)}</h4><p>${esc(p.project_id)} · ${esc(p.environment||'')} · ${p.open_incidents} open</p></div>`).join('')||'<p style="font-size:.75rem;color:var(--text-muted)">None</p>';
-  }catch(e){ box.innerHTML=''; }
-}
 async function openProject(pid, tab){
+  CUR_PROJECT=pid;
   go('projects');
+  loadSideProjects();
   const box=document.getElementById('project-detail'); if(!box) return;
   box.innerHTML='<div class="skeleton"></div>';
   try{
@@ -1269,8 +1341,10 @@ async function openProject(pid, tab){
       body.innerHTML=(p.pull_requests||[]).map(r=>`<div class="evidence-box"><strong>PR #${r.pr_number||'?'}</strong> ${esc(r.title||'')} ${statusPill(r.status)}<br/><button class="sim-btn" onclick="go('prs','${esc(r.pr_id)}')">View PR</button></div>`).join('')||'<p style="color:var(--text-muted)">No pull requests have been created from RCA remediations.</p>';
     } else {
       const d=p.detected||{};
+      const sc=p.sources_config||{};
+      const integ=[['GitHub / Git',p.repository_url||p.local_path?'connected':'not configured'],['Cloud Logging',sc.log_source||(p.gcp_project_id?'default':'not configured')],['Cloud Monitoring',sc.metrics_source||(p.gcp_project_id?'default':'not configured')],['Cloud Trace',sc.trace_source||(p.gcp_project_id?'default':'not configured')],['Deployments',sc.deployment_source||(p.gcp_project_id?'Cloud Run':'not configured')],['Prometheus / Grafana / Datadog / Kubernetes',(sc.metrics_source&&!/cloud|upload/i.test(sc.metrics_source))?sc.metrics_source:'not configured']];
       body.innerHTML=`<div style="font-size:.84rem">Languages: ${esc((d.languages||[]).join(', ')||'—')}<br/>Frameworks: ${esc((d.frameworks||[]).join(', ')||'—')}<br/>Services: ${esc((d.services||[]).join(', ')||'—')}<br/>Tests: ${(d.tests||[]).length} file(s) · Dockerfiles: ${(d.dockerfiles||[]).length} · CI: ${(d.ci_files||[]).length}<br/>Repository Access: <strong>${esc(p.repo_access||'READ_ONLY')}</strong> (PR creation ${p.repo_access==='PR_CREATION_ENABLED'?'enabled':'requires CODE_CHANGE approval gating'})</div>
-      <div style="margin-top:8px;display:flex;gap:6px"><button class="sim-btn" onclick="rescanProject('${esc(pid)}')">Re-scan Repository</button><button class="sim-btn" onclick="testSource('${esc(pid)}','git')">Test Connection</button><button class="sim-btn" onclick="disconnectSource('${esc(pid)}','git')">Disconnect Repository</button></div><div id="proj-cfg-msg" style="font-size:.8rem;margin-top:6px"></div>`;
+      <div style="margin-top:10px"><strong>Integrations</strong>${integ.map(([n,s])=>'<div class="evidence-box">'+esc(n)+': '+( /connected|default/.test(s)?'✓ '.concat(esc(s)):'• '.concat(esc(s)))+'</div>').join('')}</div><div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="sim-btn" data-pid="'+pid+'" onclick="editProject(this.dataset.pid)">Configure</button><button class="sim-btn" onclick="rescanProject('${esc(pid)}')">Re-scan Repository</button><button class="sim-btn" onclick="testSource('${esc(pid)}','git')">Test Connection</button><button class="sim-btn" onclick="disconnectSource('${esc(pid)}','git')">Disconnect Repository</button></div><div id="proj-cfg-msg" style="font-size:.8rem;margin-top:6px"></div>`;
     }
   }catch(e){ box.innerHTML='<div class="card">Failed to load project. <button class="sim-btn" data-pid="'+pid+'" onclick="openProject(this.dataset.pid)">Retry</button></div>'; }
 }
@@ -1291,14 +1365,14 @@ async function renderWizard(){
   const sel=(k,opts)=>`<select id="wz-${k}" onchange="wizSet('${k}',this.value)">${opts.map(o=>`<option${d[k]===o?' selected':''}>${o}</option>`).join('')}</select>`;
   if(WIZ.step===1){ body+=`<h3>Basic Project Details</h3><label>Project Name</label>${inp('name','Checkout Platform')}<label>Description</label>${inp('description','')}<label>Environment</label>${sel('environment',['production','staging','dev'])}<label>Team / Owner</label>${inp('team_owner','sre')}`; }
   if(WIZ.step===2){ body+=`<h3>Source Repository</h3><label>Git Provider</label>${sel('provider',['github','local'])}<label>Repository URL</label>${inp('repository_url','https://github.com/...git')}<label>Default Branch</label>${inp('default_branch','main')}<label>Repository Path if local</label>${inp('local_path','cloud-rca-demo-app')}<label>Service Path / Monorepo Subdirectory (optional)</label>${inp('service_path','services/checkout')}`; }
-  if(WIZ.step===3){ body+=`<h3>Google Cloud Configuration</h3><label>GCP Project ID</label>${inp('gcp_project_id','')}<label>Region</label>${inp('region','us-central1')}<label>Cloud Run services (comma separated)</label>${inp('services','checkout-service')}<div style="font-size:.78rem;color:var(--text-muted)">Telemetry, metrics, traces and deployments are read through existing providers when credentials exist; nothing is faked.</div>`; }
+  if(WIZ.step===3){ body+=`<h3>Google Cloud Configuration</h3><label>GCP Project ID</label>${inp('gcp_project_id','')}<label>Region</label>${inp('region','us-central1')}<label>Cloud Run services (comma separated)</label>${inp('services','checkout-service')}<label>Log Source (optional)</label>${sel('log_source',['','Cloud Logging','CloudWatch','Datadog','Upload'])}<label>Metrics Source (optional)</label>${sel('metrics_source',['','Cloud Monitoring','Prometheus','Datadog','Upload'])}<label>Trace Source (optional)</label>${sel('trace_source',['','Cloud Trace','Grafana Tempo','Upload'])}<label>Deployment Source (optional)</label>${sel('deployment_source',['','Cloud Run','Kubernetes','Upload'])}<div style="font-size:.78rem;color:var(--text-muted)">Sources are recorded as labels only; telemetry is read through existing providers when credentials exist. Nothing is faked.</div>`; }
   if(WIZ.step===4){ body+=`<h3>Repository Scan</h3><div id="wiz-scan"><span style="color:var(--text-muted)">Scanning (read-only)…</span></div>`; }
   if(WIZ.step===5){ const r=WIZ.result||{}; body+=`<h3>Confirm</h3><div style="font-size:.85rem">Services: ${esc(((r.scan||{}).services||[]).join(', ')||'none detected')}<br/>Branch: ${esc(d.default_branch||'main')}<br/>Tests: ${((r.scan||{}).tests||[]).length} file(s)<br/>RCA readiness: ${(r.readiness&&r.readiness.rca_ready)?'✓ ready':'• see reasons'}<br/><span style="color:var(--text-muted)">${esc(((r.readiness||{}).reasons||[]).join('; '))}</span></div>`; }
   body+=`<div style="display:flex;gap:8px;margin-top:12px"><button class="sim-btn" onclick="closeModal()">Cancel</button><span style="flex:1"></span>`;
   if(WIZ.step>1) body+=`<button class="sim-btn" onclick="wizNav(-1)">Back</button>`;
   body+=`<button class="btn btn-primary" onclick="wizNav(1)">${WIZ.step===5?'Complete Onboarding':(WIZ.step===4?'Scan Again':'Next')}</button></div>`;
   w.innerHTML=body;
-  ['name','description','team_owner','repository_url','default_branch','local_path','service_path','gcp_project_id','region','services'].forEach(k=>{const el=document.getElementById('wz-'+k); if(el) el.value=d[k]||'';});
+  ['name','description','team_owner','repository_url','default_branch','local_path','service_path','gcp_project_id','region','services','log_source','metrics_source','trace_source','deployment_source'].forEach(k=>{const el=document.getElementById('wz-'+k); if(el) el.value=d[k]||'';});
   if(WIZ.step===4) wizDoScan();
 }
 async function wizNav(dir){
@@ -1309,7 +1383,7 @@ async function wizNav(dir){
 }
 async function wizDoScan(){
   const box=document.getElementById('wiz-scan'); if(!box) return;
-  const payload={name:WIZ.data.name||'unnamed',description:WIZ.data.description||'',environment:WIZ.data.environment||'production',team_owner:WIZ.data.team_owner||'',provider:WIZ.data.provider||'github',repository_url:WIZ.data.repository_url||'',default_branch:WIZ.data.default_branch||'main',local_path:WIZ.data.local_path||'',gcp_project_id:WIZ.data.gcp_project_id||'',region:WIZ.data.region||'us-central1',services:(WIZ.data.services||'').split(',').map(s=>s.trim()).filter(Boolean)};
+  const payload={project_id:WIZ.edit_id||undefined,name:WIZ.data.name||'unnamed',description:WIZ.data.description||'',environment:WIZ.data.environment||'production',team_owner:WIZ.data.team_owner||'',provider:WIZ.data.provider||'github',repository_url:WIZ.data.repository_url||'',default_branch:WIZ.data.default_branch||'main',local_path:WIZ.data.local_path||'',gcp_project_id:WIZ.data.gcp_project_id||'',region:WIZ.data.region||'us-central1',services:(WIZ.data.services||'').split(',').map(s=>s.trim()).filter(Boolean),log_source:WIZ.data.log_source||'',metrics_source:WIZ.data.metrics_source||'',trace_source:WIZ.data.trace_source||'',deployment_source:WIZ.data.deployment_source||''};
   const r=await fetch('/api/projects/onboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const d=await r.json();
   if(!r.ok){ box.innerHTML='<span style="color:var(--danger,#c0564d)">Onboarding failed: '+esc(d.detail||r.status)+'</span>'; return; }
@@ -1318,6 +1392,14 @@ async function wizDoScan(){
   box.innerHTML=`<div style="font-size:.85rem">Languages: ${esc((s.languages||[]).join(', ')||'—')}<br/>Frameworks: ${esc((s.frameworks||[]).join(', ')||'—')}<br/>Services: ${esc((s.services||[]).join(', ')||'—')}<br/>Dockerfiles: ${(s.dockerfiles||[]).length} · Tests: ${(s.tests||[]).length} · CI: ${(s.ci_files||[]).length} · Files scanned: ${s.file_count||0}${s.error?('<br/>Note: '+esc(s.error)):''}</div><div style="font-size:.8rem;margin-top:6px">RCA readiness: ${(d.readiness&&d.readiness.rca_ready)?'✓ ready':'• '+(esc(((d.readiness||{}).reasons||[]).join('; '))||'see reasons')}</div>`;
 }
 async function wizSubmit(){ closeModal(); loadProjects(); loadSideProjects(); go('projects',WIZ.project_id||''); }
+async function editProject(pid){
+  try{
+    const p=await (await fetch('/api/projects/'+pid)).json();
+    WIZ={step:1,mode:'edit',edit_id:pid,data:{name:p.name||'',description:p.description||'',environment:p.environment||'production',team_owner:p.team_owner||'',provider:p.provider||'github',repository_url:p.repository_url||'',default_branch:p.default_branch||'main',local_path:p.local_path||'',service_path:(p.detected&&p.detected.services||[])[0]||'',gcp_project_id:p.gcp_project_id||'',region:p.region||'us-central1',services:(p.services||[]).join(', '),log_source:(p.sources_config||{}).log_source||'',metrics_source:(p.sources_config||{}).metrics_source||'',trace_source:(p.sources_config||{}).trace_source||'',deployment_source:(p.sources_config||{}).deployment_source||''}};
+    document.getElementById('modal').classList.add('open');
+    renderWizard();
+  }catch(e){ alert('Could not load project'); }
+}
 async function rescanProject(pid){
   const m=document.getElementById('proj-cfg-msg'); if(m) m.innerText='Scanning…';
   const r=await fetch('/api/projects/'+pid+'/scan',{method:'POST'});
@@ -1351,7 +1433,10 @@ async function renderPRs(){
   const proj=document.getElementById('pr-filter-project').value;
   const st=document.getElementById('pr-filter-status').value;
   let url='/api/pull-requests'+(proj?'?project='+encodeURIComponent(proj):'');
-  try{ ALL_PRS=await (await fetch(url)).json(); }catch(e){ ALL_PRS=[]; }
+  let failed=false;
+  try{ const r=await fetch(url); if(!r.ok) throw 0; ALL_PRS=await r.json(); }
+  catch(e){ failed=true; ALL_PRS=[]; }
+  if(failed){ body.innerHTML='<tr><td colspan="8">Could not load pull requests. <button class="sim-btn" onclick="renderPRs()">Retry</button></td></tr>'; return; }
   const rows=ALL_PRS.filter(p=>!st||p.status===st);
   document.getElementById('pr-count').innerText=rows.length+' PR(s)';
   body.innerHTML=rows.length?rows.map(p=>`<tr class="clickable" onclick="openPR('${esc(p.pr_id)}')">`+
@@ -1445,9 +1530,11 @@ async function analyzeUpload(){
 }
 async function refreshAnalyses(){
   try{
-    const rows=await (await fetch('/api/log-analyses')).json();
+    const r=await fetch('/api/log-analyses');
+    if(!r.ok) throw 0;
+    const rows=await r.json();
     document.getElementById('analyses-list').innerHTML=rows.length?rows.map(a=>`<div class="evidence-box"><strong>${esc(a.analysis_id)}</strong> ${esc(a.project_id)} · ${(a.files||[]).length} file(s) · ${a.record_count} records · ${esc(a.status)} <button class="sim-btn" onclick="openAnalysis('${esc(a.analysis_id)}')">Open</button></div>`).join(''):'<span style="color:var(--text-muted)">No log analyses yet.</span>';
-  }catch(e){}
+  }catch(e){ document.getElementById('analyses-list').innerHTML='<span style="color:var(--text-muted)">Could not load analyses. <button class="sim-btn" onclick="refreshAnalyses()">Retry</button></span>'; }
 }
 async function openAnalysis(aid){
   try{
@@ -2392,6 +2479,9 @@ def create_project(body: dict):
         default_branch=body.get("default_branch", "main"), local_path=body.get("local_path", ""),
         gcp_project_id=body.get("gcp_project_id", ""), region=body.get("region", ""),
         services=body.get("services", []), status="active",
+        sources_config={k: body.get(k, "") for k in
+                        ("log_source", "metrics_source", "trace_source", "deployment_source")
+                        if body.get(k)},
         data_sources=[{"kind": k, "status": "connected", "detail": ""}
                       for k in body.get("sources", []) if k in ("git", "gcp", "upload")],
     )

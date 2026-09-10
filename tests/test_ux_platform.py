@@ -5,6 +5,7 @@ uploads + file RCA, PR registry, home stats, export gating.
 import io
 import json
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -285,6 +286,55 @@ def test_homepage_shell_and_terminology():
     assert "Phase 4" not in html
     for view in ["home", "projects", "incidents", "prs", "analyze", "settings"]:
         assert f"data-view=\"{view}\"" in html or f"go('{view}')" in html
+
+
+def test_app_shell_layout_rules():
+    """Layout architecture: grid shell, fixed sidebar widths, drawer only mobile."""
+    c = _client()
+    html = c.get("/").text
+    css = html.split("<style>")[1].split("</style>")[0]
+    assert html.count('<nav id="topnav"') == 1
+    assert html.count('<div class="sidebar">') == 1
+    assert html.count('<div class="main-content">') == 1
+    assert html.count('<div id="app">') == 1
+    for view in ["view-home", "view-projects", "view-incidents", "view-prs",
+                 "view-analyze", "view-settings"]:
+        assert html.count(f'id="{view}"') == 1
+    assert "grid-template-rows:auto" in css.replace(" ", "")
+    assert "--sidebar-width:272px" in css.replace(" ", "")
+    assert "max-width: 767px" in css or "max-width:767px" in css
+    queries = re.findall(r"@media\s*\([^)]*\)", css)
+    assert not [q for q in queries if re.search(r"(1280|1600|1920)px", q)], queries
+    assert "aria-expanded" in html and "aria-current" in html
+    assert html.count('id="build-stamp"') == 1
+    assert "Approval & Action History" in html
+
+
+def test_project_sources_config_persisted():
+    c = _client()
+    created = c.post("/api/projects", json={
+        "name": "SourcesProj", "log_source": "Datadog",
+        "metrics_source": "Prometheus", "trace_source": "",
+        "deployment_source": "Kubernetes"}).json()
+    pid = created["project_id"]
+    fetched = c.get(f"/api/projects/{pid}").json()
+    assert fetched["sources_config"]["log_source"] == "Datadog"
+    assert fetched["sources_config"]["metrics_source"] == "Prometheus"
+    assert fetched["sources_config"]["deployment_source"] == "Kubernetes"
+    assert "trace_source" not in fetched["sources_config"]
+
+
+def test_code_fix_approval_carries_rollback_plan(demo_repo):
+    from app.main import LAST_RCA
+    LAST_RCA["INC-RB-PLAN"] = {
+        "root_cause_category": "connection_pool_exhaustion",
+        "root_cause": "pool", "confidence": 0.9,
+        "supporting_evidence": ["a"], "contradictory_evidence": [],
+        "service": "checkout-service"}
+    c = _client()
+    data = c.post("/api/incidents/INC-RB-PLAN/generate-fix").json()
+    assert data["proposal"] is not None
+    assert "PR unmerged" in data["approval"]["rollback_plan"]
 
 
 def test_home_stats_and_export_gating():

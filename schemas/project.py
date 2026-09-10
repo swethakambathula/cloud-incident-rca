@@ -25,6 +25,8 @@ class Project(BaseModel):
     region: str = ""
     services: List[str] = Field(default_factory=list)
     status: str = "active"
+    sources_config: dict = Field(default_factory=dict,
+                                 description="Optional telemetry source hints: log_source, metrics_source, trace_source, deployment_source")
     created_at: str = ""
     last_scan: str = ""
     detected: dict = Field(default_factory=dict)

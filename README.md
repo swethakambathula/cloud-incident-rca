@@ -376,6 +376,8 @@ The dashboard opens on **Home** (`#/`): stat cards (projects, open incidents, RC
 
 **Theme:** `◐ Theme` toggles dark/light/system (persisted); light theme keeps the monochrome professional style. Status accents stay restrained (success/warning/danger only).
 
+**App shell & layout:** grid shell (`body`: header + content rows; content: 272px sidebar + fluid main, 232px under 1280px, 72px icon rail under 1024px, overlay drawer under 768px with backdrop/Escape). Header holds brand, global nav, theme, settings and operator chip; sidebar holds compact project rows, operations, administration and a compact Approval Center. Views are capped at 1600px with no page-level horizontal scroll; terminal/tables/diffs scroll internally. Verify with `python scripts/check_layout.py` (single shell, breakpoints, no competing positioning) and `python scripts/check_dashboard.py` (served-JS gate).
+
 **Key APIs:** `GET /api/taxonomy`, `GET/POST /api/projects`, `POST /api/projects/onboard|/{id}/scan|test-connection|disconnect`, `GET /api/incidents/meta|/{id}|activity|export`, `POST /api/projects/{pid}/incidents|/api/incidents/{id}/notes`, `GET /api/pull-requests|/{pr}`, `POST /api/logs/upload|/logs/{aid}/analyze`, `GET /api/log-analyses`, `GET /api/home/stats`.
 
 **Run:** `uvicorn app.main:app` (or `python app.py`), open `/`. **Tests:** `pytest -q` (full gate), `pytest tests/test_ux_platform.py -v` (platform: taxonomy, onboarding/scan, lifecycle + invalid transitions, manual RCA, upload validation, file RCA, PR registry, home/export gating, approval-gated PR, persisted diffs).
