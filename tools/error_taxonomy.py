@@ -22,6 +22,18 @@ SCENARIOS: Dict[str, Tuple[str, str]] = {
     "network-timeout": (INFRA, "Network"),
     "malformed-payload": (CODE, "Application Logic"),
     "rate-limit": (INFRA, "Quota"),
+    # Tier-1 code/application simulations
+    "null-pointer": (CODE, "Null Handling"),
+    "key-error": (CODE, "Null Handling"),
+    "invalid-payload": (CODE, "Validation"),
+    "feature-flag-regression": (CODE, "Application Logic"),
+    "dependency-timeout": (CODE, "Application Dependency"),
+    "api-contract-mismatch": (CODE, "Application Dependency"),
+    "cpu-hot-loop": (INFRA, "Compute"),
+    "race-condition": (CODE, "Concurrency"),
+    "missing-env-var": (CODE, "Configuration"),
+    "dependency-version-regression": (CODE, "Configuration"),
+    "slow-query": (CODE, "Application Dependency"),
 }
 
 # RCA category -> (domain, subcategory); unknown stays honest
@@ -39,6 +51,10 @@ CATEGORIES: Dict[str, Tuple[str, str]] = {
     "network_timeout": (INFRA, "Network"),
     "malformed_payload": (CODE, "Application Logic"),
     "rate_limit": (INFRA, "Quota"),
+    "null_pointer": (CODE, "Null Handling"),
+    "race_condition": (CODE, "Concurrency"),
+    "slow_query": (CODE, "Application Dependency"),
+    "dependency_version_regression": (CODE, "Configuration"),
     "unknown": ("Unknown", "Unknown"),
 }
 
@@ -47,16 +63,21 @@ GROUPS = {
     "code": {
         "title": "Code / Application Errors",
         "subgroups": {
-            "Configuration": ["bad-deployment", "config-error"],
-            "Application Logic": ["malformed-payload", "auth-failure"],
-            "Application Dependency": ["dependency-failure", "db-timeout"],
+            "Null Handling": ["null-pointer", "key-error"],
+            "Validation": ["invalid-payload", "malformed-payload"],
+            "Application Logic": ["feature-flag-regression", "auth-failure"],
+            "Configuration": ["bad-deployment", "config-error", "missing-env-var",
+                              "dependency-version-regression"],
+            "Application Dependency": ["dependency-failure", "dependency-timeout",
+                                       "api-contract-mismatch", "db-timeout", "slow-query"],
             "Application Resource": ["pool-exhaustion"],
+            "Concurrency": ["race-condition"],
         },
     },
     "infra": {
         "title": "Infrastructure / Platform Errors",
         "subgroups": {
-            "Compute": ["cpu-exhaustion", "memory-leak"],
+            "Compute": ["cpu-exhaustion", "cpu-hot-loop", "memory-leak"],
             "Network": ["network-timeout"],
             "Capacity": ["traffic-overload"],
             "Quota": ["rate-limit"],
@@ -77,6 +98,17 @@ LABELS = {
     "network-timeout": "Network Timeout",
     "malformed-payload": "Malformed Input",
     "rate-limit": "Rate Limit",
+    "null-pointer": "Null Pointer / NoneType",
+    "key-error": "Missing Dictionary Key",
+    "invalid-payload": "Invalid Payload",
+    "feature-flag-regression": "Feature Flag Regression",
+    "dependency-timeout": "Dependency Timeout",
+    "api-contract-mismatch": "API Contract Mismatch",
+    "cpu-hot-loop": "CPU Hot Loop",
+    "race-condition": "Race Condition",
+    "missing-env-var": "Missing Environment Variable",
+    "dependency-version-regression": "Dependency Version Regression",
+    "slow-query": "Slow Query",
 }
 
 

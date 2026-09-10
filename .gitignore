@@ -18,9 +18,12 @@ __pycache__/
 
 # Runtime incident/platform stores (seeded automatically, never commit test data)
 data/uploads/
+data/attachments/
 data/activity.jsonl
 data/agent_prs.jsonl
 data/incidents.json
 data/log_analyses.jsonl
 data/projects.json
+data/analysis_sessions.json
+data/incident_attachments.json
 data/audit.log

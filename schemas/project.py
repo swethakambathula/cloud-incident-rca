@@ -27,6 +27,10 @@ class Project(BaseModel):
     status: str = "active"
     sources_config: dict = Field(default_factory=dict,
                                  description="Optional telemetry source hints: log_source, metrics_source, trace_source, deployment_source")
+    service_mappings: dict = Field(default_factory=dict,
+                                   description="service -> repo path, e.g. checkout-service -> services/checkout/")
+    readiness: dict = Field(default_factory=dict,
+                            description="Last repository readiness scan result")
     created_at: str = ""
     last_scan: str = ""
     detected: dict = Field(default_factory=dict)

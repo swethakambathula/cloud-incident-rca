@@ -31,3 +31,34 @@ def test_dependency_timeout_fixed():
     from services.checkout import dependencies
     assert dependencies.ORDERS_TIMEOUT_S >= 5, "downstream timeout still too aggressive"
     assert dependencies.ORDERS_MAX_RETRIES >= 2, "no retry budget for transient downstream slowness"
+
+
+def test_null_pointer_fixed():
+    """payment_processor must guard None profile before attribute access."""
+    import inspect
+    from services.checkout import payment_processor
+    src = inspect.getsource(payment_processor.process_payment)
+    assert "payment_profile is None" in src or "PaymentProfileNotFound" in src, \
+        "None guard missing in process_payment"
+
+
+def test_contract_mismatch_fixed():
+    import json
+    from services.orders import contract
+    out = contract.serialize_order({"id": "ord-1"})
+    json.loads(out)  # must not raise TypeError
+
+
+def test_race_condition_fixed():
+    import inspect
+    from services.checkout import concurrency
+    src = inspect.getsource(concurrency.deduct_inventory)
+    assert "use_lock" in src or "_lock" in src or "compare" in src.lower(), \
+        "no locking/compare-and-swap in deduct_inventory"
+
+
+def test_slow_query_fixed():
+    from services.checkout import queries
+    import inspect
+    src = inspect.getsource(queries.order_history)
+    assert "index" in src.lower() or "user_id" in src, "order_history still unindexed"

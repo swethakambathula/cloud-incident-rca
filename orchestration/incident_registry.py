@@ -89,8 +89,14 @@ class IncidentRegistry:
         os.replace(tmp, self.path)
 
     def ensure(self, incident_id: str, **fields) -> dict:
+        try:
+            from schemas.incident_source import normalize_source
+        except Exception:
+            def normalize_source(v=""):
+                return (v or "MANUAL").strip().upper() or "MANUAL"
         data = self._load()
         if incident_id not in data:
+            source = normalize_source(fields.get("source") or fields.get("evidence_source") or "MANUAL")
             data[incident_id] = {
                 "incident_id": incident_id,
                 "project_id": fields.get("project_id", "unassigned"),
@@ -99,13 +105,26 @@ class IncidentRegistry:
                 "environment": fields.get("environment", "prod"),
                 "services": fields.get("services", []),
                 "status": "NEW",
-                "evidence_source": fields.get("evidence_source", ""),
+                "source": source,
+                "evidence_source": fields.get("evidence_source", source.lower()),
+                "scenario_id": fields.get("scenario_id", ""),
+                "is_simulation": source == "SIMULATION",
+                "description": fields.get("description", ""),
                 "error_domain": "", "error_subcategory": "",
                 "started_at": fields.get("started_at", _now()),
                 "rca_runs": [], "notes": [], "pr_id": "",
                 "history": [{"at": _now(), "from": "", "to": "NEW"}],
             }
             self._save(data)
+        else:
+            # Backfill source on legacy records; never overwrite an existing source.
+            rec = data[incident_id]
+            if not rec.get("source"):
+                legacy = rec.get("evidence_source", "") or "manual"
+                mapping = {"live": "SIMULATION", "manual": "MANUAL", "upload": "LOG_UPLOAD"}
+                rec["source"] = mapping.get(str(legacy).lower(), "MANUAL")
+                rec["is_simulation"] = rec["source"] == "SIMULATION"
+                self._save(data)
         return data[incident_id]
 
     def get(self, incident_id: str) -> Optional[dict]:

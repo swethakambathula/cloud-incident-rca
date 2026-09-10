@@ -72,6 +72,12 @@ DEFAULT_PROJECT = {
     "gcp_project_id": os.getenv("GOOGLE_CLOUD_PROJECT", ""),
     "region": os.getenv("GOOGLE_CLOUD_REGION", "us-central1"),
     "services": ["checkout-service", "orders-service", "payments-service"],
+    "service_mappings": {
+        "checkout-service": "services/checkout/",
+        "orders-service": "services/orders/",
+        "payments-service": "services/payments/",
+    },
+    "readiness": {},
     "status": "active",
     "created_at": "2026-09-01T00:00:00+00:00",
     "last_scan": "",
