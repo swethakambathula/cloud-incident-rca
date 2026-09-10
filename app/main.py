@@ -161,6 +161,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .tabs button{padding:7px 12px;border-radius:6px;border:1px solid var(--border-color);background:#101010;color:var(--text-muted);cursor:pointer;font-size:.8rem}
         .tabs button.on{background:#262626;color:#fff;border-color:#4a4a4a}
         .skeleton{background:linear-gradient(90deg,#141414,#1e1e1e,#141414);border-radius:6px;min-height:18px;margin:6px 0;animation:sk 1.4s infinite}
+        .side-h{font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin:0 0 6px}
+        .side-link{width:100%;text-align:left;justify-content:flex-start}
+        #app.collapsed .sidebar{display:none}
         @keyframes sk{0%{opacity:.5}50%{opacity:1}100%{opacity:.5}}
         .metric-chip{background:#000;border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;font-size:.78rem}
         .metric-chip strong{font-size:1rem;display:block}
@@ -517,20 +520,6 @@ let LOGS=[];
 let PAUSED=false;
 let _lastSumSig='';
 
-async function loadIncidents(){
-  const res=await fetch('/api/incidents'); const files=await res.json();
-  const c=document.getElementById('incident-list'); c.innerHTML='';
-  files.forEach((f,idx)=>{
-    const card=document.createElement('div'); card.className='incident-card'+(idx===0?' active':'');
-    const title=f.replace('incident_','').replace('.json','').replace(/_/g,' ').toUpperCase();
-    card.innerHTML=`<h4>${title}</h4><p>${f}</p>`;
-    card.onclick=()=>{document.querySelectorAll('.incident-card').forEach(x=>x.classList.remove('active'));card.classList.add('active');currentIncident=f;liveIncidentFile=null;liveScenario=null;runRCA();};
-    c.appendChild(card);
-  });
-  // No auto-run: user picks an incident (click) or simulates + clicks Do RCA.
-  document.getElementById('inc-title').innerText='Google Cloud RCA Investigation';
-  document.getElementById('inc-desc').innerText='Select an incident from the sidebar, or simulate errors below and click Run Live RCA.';
-}
 async function simulate(scenario){
   const btn=document.getElementById('live-status'); btn.innerHTML='<span class="status-dot dot-red"></span>Injecting...';
   const res=await fetch('/api/simulate/'+scenario,{method:'POST'});
@@ -667,7 +656,7 @@ async function fetchLogs(){
         let html='';
         if(d.length){ html+= [...d].reverse().map(a=>_approvalCard(a,false)).join(''); }
         else{ html+='<div style="font-size:.78rem;color:var(--text-muted);margin-bottom:6px">No pending approvals</div>'; }
-        if(h.length){ html+='<div style="font-size:.7rem;color:var(--text-muted);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.05em">Decision history</div>'+h.map(a=>_historyCard(a)).join(''); }
+        if(h.length){ html+='<div style="font-size:.7rem;color:var(--text-muted);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.05em">Approval & Action History</div>'+h.map(a=>_historyCard(a)).join(''); }
         ab.innerHTML=html;
         // focus ONLY a brand-new approval input, once — never steal focus otherwise
         // (rebuilds never happen while typing, so reaching here means focus is safe to move)
@@ -1931,7 +1920,7 @@ def _record_agent_pr(incident_id, rca, proposal, approval_req, job, branch, base
         tests_status="passed" if job.pr_url else "failed",
         tests_output=(job.test_output or "")[-2000:],
         files_changed=list(proposal.files_changed), additions=proposal.lines_added,
-        deletions=proposal.lines_removed, patch=proposal.patch,
+        deletions=proposal.lines_removed, diff=proposal.patch,
         supporting_evidence=list(rca.get("supporting_evidence", []))[:8],
         approval_id=approval_req.approval_id, approved_by=approval_req.decided_by or "",
         approved_at=approval_req.decided_at or "",

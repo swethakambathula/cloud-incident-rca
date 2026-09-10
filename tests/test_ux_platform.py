@@ -42,6 +42,28 @@ def demo_repo(tmp_path, monkeypatch):
     return repo
 
 
+@pytest.fixture()
+def demo_repo(tmp_path, monkeypatch):
+    """Isolated git checkout of the demo app with a file:// origin."""
+    import shutil
+    import subprocess
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "cloud-rca-demo-app")
+    repo = str(tmp_path / "demo")
+    shutil.copytree(src, repo, ignore=shutil.ignore_patterns("__pycache__"))
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "rca@test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "rca-test"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init faulty"], cwd=repo, check=True, capture_output=True)
+    bare = str(tmp_path / "origin.git")
+    subprocess.run(["git", "init", "--bare", bare], check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", bare], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-u", "origin", "main"], cwd=repo, check=True, capture_output=True)
+    monkeypatch.setenv("DEMO_APP_PATH", repo)
+    return repo
+
+
 def test_generate_refuses_non_repo_path(tmp_path, monkeypatch):
     """Parent-repo protection: a plain directory must never be git-operated on."""
     import shutil
@@ -206,6 +228,31 @@ def test_file_rca_flow_and_history():
     assert detail["rca"]["incident_id"].startswith("INC-UPLOAD-")
 
 
+def test_pr_record_persists_diff(demo_repo, monkeypatch):
+    """End-to-end hook check: recorded PR must carry the exact proposed diff."""
+    import gitops.pr_manager as prm
+    monkeypatch.setattr(prm, "create_pr",
+                        lambda repo, branch, base, title, body: {
+                            "pr_url": "https://github.com/x/y/pull/99", "pr_number": 99})
+    iid = _seed_rca("INC-DIFF-REG")
+    c = _client()
+    c.post(f"/api/incidents/{iid}/generate-fix")
+    c.post(f"/api/incidents/{iid}/fix/approve", json={"message": "ok"})
+    assert c.post(f"/api/incidents/{iid}/fix/apply", timeout=300).json()["fix_status"] == "PR Created"
+    from projects.store import PRRegistry
+    recs = PRRegistry().by_incident(iid)
+    assert len(recs) >= 1
+    assert all(len(r.diff) > 0 and "POOL_SIZE" in r.diff for r in recs)
+
+
+def _seed_rca(incident_id, category="connection_pool_exhaustion"):
+    from app.main import LAST_RCA
+    LAST_RCA[incident_id] = {
+        "root_cause_category": category, "root_cause": "pool", "confidence": 0.9,
+        "supporting_evidence": ["a"], "contradictory_evidence": [], "service": "checkout-service"}
+    return incident_id
+
+
 def test_pr_registry_and_filters(tmp_path, monkeypatch):
     from projects import store as store_mod
     db = tmp_path / "prs.jsonl"
@@ -227,6 +274,17 @@ def test_pr_registry_and_filters(tmp_path, monkeypatch):
     assert reg.get("PR-42").external_url.endswith("/pr/42")
     assert reg.by_incident("INC-002")[0].pr_number == 42
     assert reg.get("NOPE") is None
+
+
+def test_homepage_shell_and_terminology():
+    c = _client()
+    html = c.get("/").text
+    for token in ["view-home", "view-projects", "view-prs", "topnav",
+                  "Approval Center", "Approval & Action History", "Analyze Logs"]:
+        assert token in html, f"missing {token}"
+    assert "Phase 4" not in html
+    for view in ["home", "projects", "incidents", "prs", "analyze", "settings"]:
+        assert f"data-view=\"{view}\"" in html or f"go('{view}')" in html
 
 
 def test_home_stats_and_export_gating():

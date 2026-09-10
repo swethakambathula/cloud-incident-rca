@@ -362,6 +362,26 @@ Faulty services (`checkout` pool/config/downstream, `orders`, `payments`) + 12 `
 
 ---
 
+## 🖥️ Operations Platform (Home · Projects · Incidents · PRs)
+
+The dashboard opens on **Home** (`#/`): stat cards (projects, open incidents, RCA runs, agent PRs, pending approvals), recent activity, recent PRs, quick actions, and the investigation pipeline overview. Top nav (`Home Projects Incidents Pull Requests Analyze Settings`, `◐ Theme` toggle, dark/light/system) plus hash deep-links like `#/projects/checkout-platform/incidents/INC-003-BAD-DEPLOYMENT`.
+
+**Projects:** `Projects → + Onboard Project` (5-step wizard: details → repository → cloud → read-only scan → confirm) or Connect Git Repository / Add Google Cloud Project / Upload Logs. Project detail shows overview, incidents, PRs, and configuration tabs with data sources (Test / Disconnect / Re-scan; secrets never displayed). Every incident and PR resolves to a project (default `checkout-platform` seeded).
+
+**Incidents table** (`#/incidents`): severity/status filters, ID/error/service/trace search, RCA-run and PR columns; rows open the full workspace (stepper, telemetry, RCA, code fix, notes, runs, approval timeline, related PR). **Create Incident** tab supports manual incidents (which run real RCA from stored inputs) and described simulations grouped into **Code / Application** vs **Infrastructure / Platform** errors; the RCA result shows error **Domain/Subcategory** and evidence source (live/static/upload).
+
+**Pull Requests** (`#/pull-requests`): every agent PR ever recorded (persisted in `data/agent_prs.jsonl`), filterable by project/status, with detail view (RCA summary, inline diff, tests, approval, branch/commit, clickable GitHub URL). Incident workspace links its related PR; Home lists recent PRs.
+
+**Analyze Logs** (`#/analyze`): drag-and-drop `.log/.txt/.json/.jsonl/.csv` (4 files, 25 MB each) → ingestion preview (format/source/records/time range) → **Run RCA** through the same pipeline (supporting/contradictory evidence, timeline, domain) → optional code fix when a repo is connected. History under Log Analyses. Statuses use icons + labels (✓/✕/•/!), never color alone.
+
+**Theme:** `◐ Theme` toggles dark/light/system (persisted); light theme keeps the monochrome professional style. Status accents stay restrained (success/warning/danger only).
+
+**Key APIs:** `GET /api/taxonomy`, `GET/POST /api/projects`, `POST /api/projects/onboard|/{id}/scan|test-connection|disconnect`, `GET /api/incidents/meta|/{id}|activity|export`, `POST /api/projects/{pid}/incidents|/api/incidents/{id}/notes`, `GET /api/pull-requests|/{pr}`, `POST /api/logs/upload|/logs/{aid}/analyze`, `GET /api/log-analyses`, `GET /api/home/stats`.
+
+**Run:** `uvicorn app.main:app` (or `python app.py`), open `/`. **Tests:** `pytest -q` (full gate), `pytest tests/test_ux_platform.py -v` (platform: taxonomy, onboarding/scan, lifecycle + invalid transitions, manual RCA, upload validation, file RCA, PR registry, home/export gating, approval-gated PR, persisted diffs).
+
+---
+
 ## 🧪 Running Automated Tests
 
 Run unit and integration test suites via pytest:
