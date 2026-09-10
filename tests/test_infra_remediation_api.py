@@ -54,6 +54,27 @@ def test_scale_execute_and_verify():
     assert done["postmortem"]
 
 
+def test_rollback_revision_choices_and_selected_execute():
+    c = _client()
+    c.post("/api/simulate/bad-deployment")
+    iid = c.post("/api/rca/live").json()["incident_id"]
+    aid = c.post(f"/api/incidents/{iid}/remediation/propose").json()["approval"]["approval_id"]
+
+    choices = c.get(f"/api/approvals/{aid}/revisions").json()
+    assert len(choices["revisions"]) >= 2
+    current = [r for r in choices["revisions"] if r["is_current"]]
+    previous = [r for r in choices["revisions"] if not r["is_current"]]
+    assert len(current) == 1 and len(previous) >= 1
+    assert choices["suggested"] == previous[0]["revision_name"]
+    assert all("deployed_at" in r for r in choices["revisions"])
+
+    c.post(f"/api/approvals/{aid}/approve", json={"message": "rollback to selected"})
+    done = c.post(f"/api/approvals/{aid}/execute",
+                  json={"target_revision": choices["suggested"]}).json()
+    assert done["execution"]["status"] == "SUCCESS", done["execution"]
+    assert choices["suggested"] in str(done["execution"]["after_state"])
+
+
 def test_rollback_suggests_previous_revision():
     c = _client()
     c.post("/api/simulate/bad-deployment")

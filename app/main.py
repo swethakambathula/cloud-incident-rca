@@ -257,9 +257,21 @@ async function executeInfra(id, action){
   let params={};
   try{ params=(await (await fetch('/api/approvals/'+id+'/params')).json()).params||{}; }catch(e){}
   if(action==='cloud_run_rollback'&&!params.target_revision){
-    const v=prompt('Target revision to roll back to (previous known-good revision):', '');
-    if(v===null) return; params.target_revision=(v||'').trim();
-    if(!params.target_revision){ show('Target revision is required.'); return; }
+    // Version picker: previous revisions from incident evidence, current disabled
+    let revs=[], suggested=null, current='';
+    try{
+      const rj=await (await fetch('/api/approvals/'+id+'/revisions')).json();
+      revs=rj.revisions||[]; suggested=rj.suggested; current=rj.current_revision||'';
+    }catch(e){}
+    const opts=revs.filter(r=>!r.is_current);
+    if(!opts.length){ show('No previous revisions found in incident evidence.'); return; }
+    const selId='rollback-sel-'+id;
+    show(`<div style="margin-bottom:6px">Roll back <strong>${esc(current||'current')}</strong> to:</div>`+
+      `<select id="${selId}" style="width:100%;background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:6px 8px;font-size:.78rem">`+
+      opts.map(r=>`<option value="${esc(r.revision_name)}"${r.revision_name===suggested?' selected':''}>${esc(r.revision_name)}${r.deployed_at?' — '+esc(r.deployed_at):''}${r.traffic_percent!==''?' — '+esc(String(r.traffic_percent))+'% traffic':''}</option>`).join('')+
+      `</select><div style="color:var(--text-muted)">Suggested: ${esc(suggested||opts[0].revision_name)} (newest non-current; current revision disabled)</div>`+
+      `<div style="margin-top:6px"><button onclick="doExecuteInfra('${id}','${action}',{target_revision:document.getElementById('${selId}').value})" style="padding:2px 10px;border-radius:4px;background:var(--accent-red);border:none;color:#fff;cursor:pointer">Run Rollback</button></div>`);
+    return;
   }
   if(action==='cloud_run_shift_traffic'&&!params.revision_percentages){
     const v=prompt('Traffic split JSON (must total 100), e.g. {"rev-a":100}:', '');
@@ -270,6 +282,11 @@ async function executeInfra(id, action){
     const v=prompt('max_instances (bounded by MAX_SCALE_LIMIT):', '10');
     if(v===null) return; params.max_instances=parseInt(v,10);
   }
+  doExecuteInfra(id, action, params);
+}
+async function doExecuteInfra(id, action, params){
+  const box=document.getElementById('exec-'+id);
+  const show=t=>{ if(box) box.innerHTML=t; };
   if(!confirm('Execute '+action+' with '+JSON.stringify(params)+'?')) return;
   show('<span style="color:var(--text-muted)">Executing…</span>');
   const r=await fetch('/api/approvals/'+id+'/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params)});
@@ -918,6 +935,39 @@ def approval_params(approval_id: str):
         raise HTTPException(status_code=404, detail="Approval not found")
     return {"approval_id": approval_id, "action": req.action,
             "status": req.status.value, "params": APPROVAL_PARAMS.get(approval_id, {})}
+
+
+@app.get("/api/approvals/{approval_id}/revisions")
+def approval_revisions(approval_id: str):
+    """Rollback candidates from the investigation evidence: previous versions
+    with deploy time, traffic and current-revision marking. Suggested default
+    is the newest non-current revision."""
+    req = global_approval_manager.get(approval_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    entry = LAST_INVESTIGATION.get(req.incident_id)
+    if not entry:
+        return {"approval_id": approval_id, "revisions": [], "suggested": None,
+                "hint": "No stored investigation for this incident; enter the revision manually."}
+    ev = entry["state"].incident_evidence
+    current = ev.revision_name
+    seen, out = set(), []
+    for d in (ev.recent_deployments or []):
+        if not isinstance(d, dict):
+            continue
+        name = d.get("revision_name")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append({
+            "revision_name": name,
+            "deployed_at": d.get("deployed_at") or d.get("creation_time") or "",
+            "traffic_percent": d.get("traffic_percent", d.get("traffic", "")),
+            "is_current": name == current,
+        })
+    suggested = next((r["revision_name"] for r in out if not r["is_current"]), None)
+    return {"approval_id": approval_id, "current_revision": current,
+            "revisions": out, "suggested": suggested}
 
 
 @app.post("/api/incidents/{incident_id}/analyze-code")
