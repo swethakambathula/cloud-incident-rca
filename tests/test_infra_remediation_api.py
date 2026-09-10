@@ -75,6 +75,18 @@ def test_rollback_revision_choices_and_selected_execute():
     assert choices["suggested"] in str(done["execution"]["after_state"])
 
 
+def test_live_traffic_endpoint_reports_split():
+    c = _client()
+    c.post("/api/simulate/pool-exhaustion")
+    iid = c.post("/api/rca/live").json()["incident_id"]
+    aid = c.post(f"/api/incidents/{iid}/remediation/propose").json()["approval"]["approval_id"]
+    t = c.get(f"/api/approvals/{aid}/live-traffic").json()
+    assert t["service"] == "checkout-service"
+    assert isinstance(t["traffic_split"], dict) and len(t["traffic_split"]) >= 1
+    assert sum(t["traffic_split"].values()) == 100
+    assert c.get("/api/approvals/NOPE/live-traffic").status_code == 404
+
+
 def test_rollback_suggests_previous_revision():
     c = _client()
     c.post("/api/simulate/bad-deployment")

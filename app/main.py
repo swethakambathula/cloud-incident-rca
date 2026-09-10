@@ -297,7 +297,16 @@ async function doExecuteInfra(id, action, params){
     `<div><strong>Before:</strong> ${esc(JSON.stringify(ex.before_state||{}))}</div>`+
     `<div><strong>After:</strong> ${esc(JSON.stringify(ex.after_state||{}))}</div>`+
     `<div><strong>Verification:</strong> ${esc(vf.verification_status||'')} — ${esc(vf.summary||'')}</div>`+
-    `<div>Error ${vf.error_rate_before}% → ${vf.error_rate_after}%, latency ${vf.latency_before}ms → ${vf.latency_after}ms</div>`);
+    `<div>Error ${vf.error_rate_before}% → ${vf.error_rate_after}%, latency ${vf.latency_before}ms → ${vf.latency_after}ms</div>`+
+    `<div id="livetraffic-${id}" style="margin-top:4px;color:var(--text-muted)">Checking live traffic split…</div>`);
+  if(action==='cloud_run_rollback'||action==='cloud_run_shift_traffic'){
+    try{
+      const t=await (await fetch('/api/approvals/'+id+'/live-traffic')).json();
+      const rows=Object.entries(t.traffic_split||{}).map(([rev,pct])=>`${esc(rev)}: ${pct}%`).join(' · ')||'no data';
+      const el=document.getElementById('livetraffic-'+id);
+      if(el) el.innerHTML=`<strong>Live traffic now (${esc(t.service)}):</strong> ${rows}`;
+    }catch(e){ /* leave the checking line */ }
+  }
   fetchLogs();
 }
 async function fetchLogs(){
@@ -925,6 +934,34 @@ async def propose_remediation(incident_id: str):
               approval.target_resource, approval_id=approval.approval_id)
     return {"remediation_plan": plan.model_dump(), "approval": approval.model_dump(),
             "suggested_params": APPROVAL_PARAMS[approval.approval_id]}
+
+
+@app.get("/api/approvals/{approval_id}/live-traffic")
+def approval_live_traffic(approval_id: str):
+    """Live traffic split for the approval's target service — validate a
+    rollback/shift actually took effect (Cloud Run API, mock fallback local)."""
+    import os as _os
+    req = global_approval_manager.get(approval_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    parts = (req.target_resource or "").split("/")
+    try:
+        project_id = parts[1] if len(parts) > 1 else _os.getenv("GOOGLE_CLOUD_PROJECT", "")
+        region = parts[3] if len(parts) > 3 else _os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
+        service_name = parts[5] if len(parts) > 5 else ""
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cannot parse service from target_resource")
+    if not service_name:
+        raise HTTPException(status_code=400, detail="No service in target_resource")
+    from tools.deployment_tools import get_revision_traffic_split, get_current_revision
+    split = get_revision_traffic_split(project_id, region, service_name) or {}
+    current = get_current_revision(project_id, region, service_name) or {}
+    current_rev = current.get("latest_ready_revision") or current.get("revision_name") or ""
+    if not split and current_rev:
+        split = {current_rev: current.get("traffic_percent", 100)}
+    return {"approval_id": approval_id, "service": service_name, "project_id": project_id,
+            "region": region, "current_revision": current_rev,
+            "traffic_split": split}
 
 
 @app.get("/api/approvals/{approval_id}/params")
