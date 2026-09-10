@@ -37,12 +37,21 @@ def create_fix_branch(repo_path: str, incident_id: str, root_cause: str) -> str:
     stem = f"rca/{incident_id}-{slugify(root_cause)}"
     if stem.split("/")[-1] in ("main", "master"):
         raise ValueError("Refusing branch name colliding with default branch")
-    # Unique name across repeated runs for the same incident
+    # Unique name across repeated runs for the same incident. Fresh containers
+    # have no local branches, so the remote must be consulted too — otherwise
+    # push is rejected non-fast-forward when a previous attempt already pushed.
+    try:
+        remote_refs = run_git(repo_path, ["ls-remote", "--heads", "origin", stem + "*"])
+    except (RuntimeError, PermissionError):
+        remote_refs = ""
+    def _taken(name: str) -> bool:
+        if run_git(repo_path, ["branch", "--list", name]):
+            return True
+        return any(line.split("\t")[-1] == f"refs/heads/{name}"
+                   for line in remote_refs.splitlines() if line.strip())
     branch, suffix = stem, 2
-    existing = run_git(repo_path, ["branch", "--list", branch])
-    while existing:
+    while _taken(branch):
         branch = f"{stem}-{suffix}"
         suffix += 1
-        existing = run_git(repo_path, ["branch", "--list", branch])
     run_git(repo_path, ["checkout", "-b", branch, f"origin/{base}"])
     return branch

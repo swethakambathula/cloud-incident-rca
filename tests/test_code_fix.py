@@ -175,6 +175,22 @@ def test_dirty_tree_blocks_generate_with_clear_message(demo_repo):
     assert "dirty" in r.json()["detail"].lower() or "previous" in r.json()["detail"].lower()
 
 
+def test_branch_skips_remote_only_collision(demo_repo):
+    """A previous attempt may have pushed the branch from an ephemeral
+    container: no local branch exists, but the remote one must still be
+    skipped to avoid non-fast-forward push rejection."""
+    import subprocess
+    from gitops.branch_manager import create_fix_branch
+    b1 = create_fix_branch(demo_repo, "INC-007-X", "traffic_overload")
+    assert b1 == "rca/INC-007-X-traffic-overload"
+    run_git(demo_repo, ["push", "origin", f"{b1}:{b1}"])
+    # simulate a fresh container: drop the local branch, remote keeps it
+    subprocess.run(["git", "checkout", "main"], cwd=demo_repo, check=True, capture_output=True)
+    subprocess.run(["git", "branch", "-D", b1], cwd=demo_repo, check=True, capture_output=True)
+    b2 = create_fix_branch(demo_repo, "INC-007-X", "traffic_overload")
+    assert b2 == "rca/INC-007-X-traffic-overload-2"
+
+
 def test_branch_naming_and_main_untouched(demo_repo):
     main_sha = run_git(demo_repo, ["rev-parse", "main"])
     branch = create_fix_branch(demo_repo, "INC-002-POOL", "connection_pool_exhaustion")

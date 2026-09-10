@@ -26,6 +26,7 @@ def allowed_repos():
 ALLOWED_COMMANDS = {
     "status", "diff", "fetch", "checkout", "checkout -b", "add", "commit",
     "push", "rev-parse", "rev-list", "log", "apply --check", "apply", "branch",
+    "ls-remote",
 }
 
 
