@@ -91,6 +91,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .incident-card h4{font-size:.88rem;margin-bottom:4px} .incident-card p{font-size:.75rem;color:var(--text-muted)}
         .main-content{min-width:0;width:100%;overflow-x:hidden}
         .card,.item-box,.evidence-box,.log-panel{min-width:0;overflow-wrap:anywhere}
+        .well{background:var(--surface-secondary);color:var(--text-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px 14px}
+        .rca-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(360px,.85fr);gap:20px;margin-bottom:20px}
+        @media (max-width: 1000px){.rca-grid{grid-template-columns:1fr}}
+        .rc-section{margin-top:16px}
+        .rc-section:first-child{margin-top:0}
+        .kv{display:grid;grid-template-columns:130px minmax(0,1fr);gap:4px 10px;font-size:.85rem;margin-top:6px}
+        .kv dt{color:var(--text-muted)} .kv dd{margin:0}
         .card{padding:16px 20px}
         .projects-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
         body{font-size:14px}
@@ -188,6 +195,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .tabs{display:flex;gap:6px;margin:12px 0;flex-wrap:wrap}
         .tabs button{padding:7px 12px;border-radius:6px;border:1px solid var(--border-color);background:#20242a;color:var(--text-muted);cursor:pointer;font-size:.8rem}
         .tabs button.on{background:#262626;color:#fff;border-color:#4a4a4a}
+        .btn:active{transform:translateY(1px)}
+        .btn-danger{background:linear-gradient(180deg,#5a2320,#2a1210);border:1px solid #8a3a32;color:#fff}
+        .tl-group{border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px;background:var(--surface-secondary)}
+        .tl-group>button{all:unset;display:block;width:100%;text-align:left;padding:10px 14px;cursor:pointer;box-sizing:border-box}
+        .tl-group>button:focus-visible{outline:2px solid #d9d9d9;outline-offset:-2px}
+        .tl-attrs{display:grid;grid-template-columns:130px minmax(0,1fr);gap:2px 10px;font-size:.8rem;margin-top:6px}
+        .tl-attrs dt{color:var(--text-muted)} .tl-attrs dd{margin:0}
+        .appr-modal-grid{display:grid;grid-template-columns:150px minmax(0,1fr);gap:6px 12px;font-size:.85rem;margin:10px 0}
+        .appr-modal-grid dt{color:var(--text-muted)} .appr-modal-grid dd{margin:0}
         .skeleton{background:linear-gradient(90deg,#141414,#1e1e1e,#141414);border-radius:6px;min-height:18px;margin:6px 0;animation:sk 1.4s infinite}
         .side-h{font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin:0 0 6px}
         .side-link{width:100%;text-align:left;justify-content:flex-start}
@@ -391,12 +407,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
         <div id="rca-output" style="display:none;">
-            <div class="grid">
+            <div class="rca-grid">
                 <div class="card"><div class="card-title">🎯 Confirmed Root Cause
                         <span style="margin-left:auto;display:flex;gap:6px">
-                            <button class="sim-btn" onclick="copyRcaSummary()" title="Copy concise RCA summary">Copy Summary</button>
-                            <button class="sim-btn" onclick="exportRca('json')" title="Export RCA as JSON">JSON</button>
-                            <button class="sim-btn" onclick="exportRca('markdown')" title="Export RCA as Markdown">MD</button>
+                            <button class="sim-btn" onclick="copyRcaSummary()" title="Copy concise RCA summary">Copy RCA Summary</button>
+                            <button class="sim-btn" onclick="exportRca('json')" title="Export RCA as JSON">Export JSON</button>
+                            <button class="sim-btn" onclick="exportRca('markdown')" title="Export RCA as Markdown">Export Markdown</button>
                         </span></div>
                     <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:8px">3 · RCA Results <span id="evidence-fresh"></span></div>
                     <div style="margin-bottom:12px;"><span class="badge badge-red" id="rc-category">Category</span> <span class="badge badge-yellow" id="rc-confidence">Confidence</span> <span class="badge badge-green" id="rc-risk">Risk</span></div>
@@ -553,7 +569,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
             <div class="card"><div class="card-title">Platform</div><div id="settings-body">Loading…</div></div>
         </div>
-        <div id="modal" class="modal-veil"><div class="modal" role="dialog" aria-modal="true" aria-label="Onboard project"><div id="wizard"></div></div></div>    </div>
+        <div id="modal" class="modal-veil"><div class="modal" role="dialog" aria-modal="true" aria-label="Onboard project"><div id="wizard"></div></div></div>
+        <div id="approval-modal" class="modal-veil" onclick="if(event.target===this)closeApprovalModal()"><div class="modal" role="dialog" aria-modal="true" aria-label="Review approval"><div id="approval-modal-body"></div></div></div>
+        <div id="raw-modal" class="modal-veil" onclick="if(event.target===this)closeRawDrawer()"><div class="modal" role="dialog" aria-modal="true" aria-label="Raw evidence"><div id="raw-modal-body"></div></div></div>    </div>
 </div>
 <script>
 let currentIncident='incident_001_db_timeout.json';
@@ -587,12 +605,11 @@ async function clearLogs(){ await fetch('/api/logs/clear',{method:'POST'}); docu
 let _pollInFlight=false, _lastLogSig='', _lastApprSig='';
 function _approvalCard(a, accent, open){
   const border=accent?'var(--accent-cyan)':'var(--border-color)';
-  const pad=accent?'4px 10px':'2px 8px';
   const ptype=a.action_type==='CODE_CHANGE'?'Code Change':'Infrastructure Change';
-  const head=`<span class="pill warn">• PENDING</span> <span class="pill info">${ptype}</span> <strong>${a.action}</strong> ${a.incident_id}<br/>Risk ${a.risk}`;
-  const form=`<input class="appr-msg" data-approval-id="${a.approval_id}" id="msg-${a.approval_id}" placeholder="Add a note (optional) — then click Approve or Reject" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:#20242a;color:var(--text-main);font-size:.78rem" /><div style="margin-top:6px"><button onclick="sendDecision('${a.approval_id}',true,'${a.action}','${a.incident_id}','${a.risk}')" style="padding:${pad};border-radius:4px;background:linear-gradient(180deg,#3d3d3d,#161616);border:1px solid #6f6f6f;color:#fff;cursor:pointer">Approve</button> <button onclick="sendDecision('${a.approval_id}',false,'${a.action}','${a.incident_id}','${a.risk}')" style="margin-left:6px;padding:${pad};border-radius:4px;background:linear-gradient(180deg,#232323,#0d0d0d);border:1px solid #4a4a4a;color:#fff;cursor:pointer">Reject</button></div>`;
-  return `<details class="appr"${open?' open':''} style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><summary style="cursor:pointer;font-size:.76rem;color:var(--text-muted)">${head}</summary><div style="margin-top:6px">${form}</div></details>`;
+  const conf=a.confidence!=null?` · ${Math.round(a.confidence*100)}% confidence`:'';
+  return `<details class="appr"${open?' open':''} style="padding:6px;border:1px solid ${border};border-radius:6px;margin-bottom:6px"><summary style="cursor:pointer;font-size:.76rem;color:var(--text-muted)"><span class="pill warn">• PENDING</span> <span class="pill info">${ptype}</span> <strong>${actionTitle(a.action)}</strong> ${a.incident_id}<br/>Risk ${a.risk}${conf}</summary><div style="margin-top:6px"><button onclick="openApprovalModal('${a.approval_id}')" style="padding:2px 10px;border-radius:4px;background:linear-gradient(180deg,#2e2e2e,#101010);border:1px solid #555555;color:#fff;cursor:pointer">Review</button></div></details>`;
 }
+
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function _historyCard(a){
   const st=a.status||'UNKNOWN';
@@ -811,31 +828,178 @@ async function proposeRemediation(){
   const d=await r.json();
   if(!r.ok){ rb.innerHTML='<span style="color:var(--accent-red)">'+esc(d.detail||'proposal failed')+'</span>'; return; }
   const p=d.remediation_plan, a=d.approval;
-  rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#000000"><strong>Proposed:</strong> ${esc(p.recommended_action)} (${esc(p.mitigation_type)}) Risk ${esc(p.estimated_risk)}<br/><strong>Effect:</strong> ${esc(p.expected_effect)}<br/><strong>Rollback:</strong> ${esc(p.rollback_plan)}<br/><strong>Approval:</strong> ${esc(a.approval_id)} <em>${esc(a.status)}</em> — decide in Approval Center (sidebar).</div>`;
+  renderRemediation(p, a, d.policy);
   fetchLogs();
+}
+function humanize(s){
+  s=String(s||'');
+  if(s==='WAITING_APPROVAL') return 'Waiting for Approval';
+  return s.split('_').filter(Boolean).map(w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join(' ');
+}
+const ACTION_TITLES={cloud_run_scale_within_limits:'Scale Cloud Run Within Limits',cloud_run_rollback:'Roll Back Cloud Run Revision',cloud_run_shift_traffic:'Shift Cloud Run Traffic',code_fix_pr:'Create Code Fix Pull Request'};
+function actionTitle(id){ return ACTION_TITLES[id]||humanize(id); }
+function riskPill(risk){
+  const r=String(risk||'LOW').toUpperCase();
+  const cls=(r==='LOW')?'ok':((r==='MEDIUM')?'warn':'bad');
+  return `<span class="pill ${cls}">${r.charAt(0)+r.slice(1).toLowerCase()} Risk</span>`;
+}
+function mitigationPill(mit){
+  const m=String(mit||'');
+  const label=/TEMPORARY/.test(m)?'Temporary Mitigation':(/PERMANENT/.test(m)?'Permanent Fix':humanize(m)||'Mitigation');
+  return `<span class="pill info">${label}</span>`;
+}
+
+function categoryPill(p, a){
+  const label=(a&&a.action_type==='CODE_CHANGE')?'Code Change':(/TEMPORARY/.test(String(p.mitigation_type||''))?'Temporary Mitigation':(/PERMANENT/.test(String(p.mitigation_type||''))?'Permanent Fix':'Infrastructure Change'));
+  return `<span class="pill info">${label}</span>`;
 }
 function renderRCA(data){
   const out=document.getElementById('rca-output'); out.style.display='block';
   LAST_INCIDENT=data.incident_id||null;
   document.getElementById('inc-title').innerText="Incident: "+data.incident_id;
   document.getElementById('inc-desc').innerText=`Affected: ${(data.affected_services||[]).join(', ')}`;
-  document.getElementById('rc-category').innerText=(data.root_cause_category||'unknown').toUpperCase();
-  document.getElementById('rc-confidence').innerText=`${((data.confidence_score||data.confidence||0)*100).toFixed(1)}% CONFIDENCE`;
-  document.getElementById('rc-risk').innerText=`RISK: ${data.remediation_risk||data.estimated_risk||'LOW'}`;
+  document.getElementById('rc-category').innerText=humanize(data.root_cause_category||'unknown');
+  document.getElementById('rc-confidence').innerText=`${Math.round((data.confidence_score||data.confidence||0)*100)}% confidence`;
+  document.getElementById('rc-risk').innerText=humanize(data.remediation_risk||data.estimated_risk||'LOW')+' risk';
   document.getElementById('rc-summary').innerText=data.root_cause||data.recommended_action||'';
   renderBlast(data);
   renderRcExtras(data);
   document.getElementById('rc-action').innerText=data.recommended_action||data.expected_effect||'';
   const tBox=document.getElementById('rc-timeline'); tBox.innerHTML=(data.timeline||[]).map(t=>`<div style="font-size:.78rem;padding:4px 0;border-bottom:1px solid var(--border-color)"><strong>${t.timestamp}</strong> [${t.event_type}] ${t.description}</div>`).join('')||'<span style="color:var(--text-muted)">No timeline</span>';
-  document.getElementById('additional-checks').innerHTML=(data.additional_checks_required||data.preconditions||[]).map(c=>`<div class="item-box">🔍 ${c}</div>`).join('')||'<p style="color:var(--text-muted)">None</p>';
+  document.getElementById('additional-checks').innerHTML=(data.additional_checks_required||data.preconditions||[]).map(c=>`<div class="item-box">— ${esc(c)}</div>`).join('')||'<p style="color:var(--text-muted)">None required</p>';
   document.getElementById('evidence-list').innerHTML=(data.evidence||data.supporting_evidence||[]).map(e=>`<div class="evidence-box"><span style="color:var(--accent-green)">✔</span> ${e}</div>`).join('');
   document.getElementById('contra-list').innerHTML=(data.contradictory_evidence||[]).map(c=>`<div class="evidence-box"><span style="color:var(--accent-red)">✖</span> ${c}</div>`).join('')||'<p style="color:var(--text-muted);font-size:.85rem">None</p>';
   const rb=document.getElementById('remediation-box');
-  if(data.remediation_plan||data.approval){ const p=data.remediation_plan||data; const a=data.approval; rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#000000"><strong>Remediation:</strong> ${p.recommended_action||p.action} (${p.mitigation_type||''}) Risk ${p.estimated_risk||p.risk}<br/><strong>Rollback:</strong> ${p.rollback_plan||''}<br/>${a?`<strong>Approval:</strong> ${a.approval_id} <em>${a.status}</em>`:''}</div>`; }
+  if(data.remediation_plan||data.approval){ const p=data.remediation_plan||data; renderRemediation(p, data.approval||null, data.policy||null); }
   else if(data.remediation_available){ rb.innerHTML=`<button class="sim-btn" onclick="proposeRemediation()">Propose Remediation Plan</button><div style="font-size:.78rem;color:var(--text-muted);margin-top:6px">Creates one infra approval (human-gated). Nothing runs automatically.</div>`; }
   else { rb.innerHTML='';}
   out.scrollIntoView({behavior:'smooth'});
+  if(data.incident_id){ renderTimelineSection(data.incident_id, 'significant'); }
 }
+function renderRemediation(p, a, policy){
+  const rb=document.getElementById('remediation-box'); if(!rb) return;
+  const title=actionTitle(p.recommended_action||p.action||'');
+  const checks=(p.preconditions&&p.preconditions.length)?p.preconditions.map(c=>`<div class="item-box">— ${esc(c)}</div>`).join(''):'None required';
+  const perms=(p.required_permissions&&p.required_permissions.length)?esc(p.required_permissions.join(', ')):'—';
+  let approvalHtml='';
+  if(a){
+    const st=String(a.status||'');
+    approvalHtml=`<div class="rc-section"><strong>Approval</strong><div style="margin-top:4px">${st==='PENDING'?'Waiting for approval.':humanize(st)+'.'}${st==='PENDING'?` <button class="sim-btn" onclick="openApprovalModal('${esc(a.approval_id)}')">Review Approval</button>`:''}</div></div>`;
+  } else {
+    approvalHtml=`<div class="rc-section"><button class="sim-btn" onclick="proposeRemediation()">Propose Remediation Plan</button><div style="font-size:.78rem;color:var(--text-muted);margin-top:6px">Creates one infra approval (human-gated). Nothing runs automatically.</div></div>`;
+  }
+  rb.innerHTML=`<div class="well"><h4 style="margin:0 0 8px;font-size:1rem">${esc(title)}</h4>`+
+    `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">${mitigationPill(p.mitigation_type)}${categoryPill(p, a)}${riskPill(p.estimated_risk||p.risk)}${(p.human_approval_required!==false)?'<span class="pill warn">! Approval Required</span>':''}</div>`+
+    `<div style="font-size:.72rem;color:var(--text-muted)">Internal action: <code>${esc(p.recommended_action||p.action||'')}</code></div>`+
+    `<div class="rc-section"><strong>Why this is recommended</strong><div style="margin-top:4px">${esc(p.expected_effect||p.rationale||'')}</div></div>`+
+    `<div class="rc-section"><strong>Verification plan</strong><div style="margin-top:4px">${esc(p.verification_plan||'')}</div></div>`+
+    `<div class="rc-section"><strong>Execution safety</strong><dl class="kv"><dt>Policy</dt><dd>${esc(humanize(policy||'Allowed With Approval'))}</dd><dt>Reversible</dt><dd>${esc(p.reversibility||'—')}</dd><dt>Permissions</dt><dd>${perms}</dd></dl></div>`+
+    `<div class="rc-section"><strong>Rollback</strong><div style="margin-top:4px">${esc(p.rollback_plan||'')}</div></div>`+
+    `<div class="rc-section"><strong>Additional checks</strong><div style="margin-top:4px">${checks}</div></div>`+
+    approvalHtml+`</div>`;
+}
+async function openApprovalModal(approval_id){
+  const veil=document.getElementById('approval-modal');
+  const body=document.getElementById('approval-modal-body');
+  veil.classList.add('open');
+  body.innerHTML='<span style="color:var(--text-muted)">Loading approval…</span>';
+  try{
+    const a=await (await fetch('/api/approvals/'+approval_id)).json();
+    const isCode=a.action_type==='CODE_CHANGE';
+    const title=isCode?'Create Code Fix Pull Request':actionTitle(a.action);
+    let paramsHtml='';
+    try{
+      const pj=await (await fetch('/api/approvals/'+approval_id+'/params')).json();
+      const prm=pj.params||{};
+      if(Object.keys(prm).length) paramsHtml=`<div class="rc-section"><strong>Proposed parameters</strong><pre style="background:#000;border:1px solid var(--border-color);border-radius:6px;padding:10px;font-size:.78rem;white-space:pre-wrap">${esc(JSON.stringify(prm,null,2))}</pre></div>`;
+    }catch(e){}
+    const extra=isCode?`<div class="rc-section"><strong>Patch</strong><div style="margin-top:4px">SHA256 <code>${esc((a.patch_sha256||'').slice(0,16))}…</code><br/><span style="font-size:.78rem;color:var(--text-muted)">Target: ${esc(a.target_resource||'')}</span></div></div>`:'';
+    body.innerHTML=`<h3 style="margin-top:0">Review Approval</h3>
+      <dl class="appr-modal-grid">
+      <dt>Incident</dt><dd>${esc(a.incident_id||'')}</dd>
+      <dt>Requested action</dt><dd><strong>${esc(title)}</strong></dd>
+      <dt>Action type</dt><dd>${isCode?'Code Change':'Infrastructure Change'}</dd>
+      <dt>Risk</dt><dd>${esc(a.risk||'')}</dd>
+      <dt>Reason</dt><dd>${esc(a.rationale||a.expected_impact||'')}</dd>
+      <dt>Expected impact</dt><dd>${esc(a.expected_impact||'')}</dd>
+      <dt>Rollback</dt><dd>${esc(a.rollback_plan||'')}</dd>
+      <dt>Status</dt><dd>${esc(a.status||'')}</dd>
+      </dl>${paramsHtml}${extra}
+      <div style="font-size:.78rem;color:var(--text-muted);margin:8px 0">${isCode?'Approving authorizes only the exact patch identified by the displayed SHA256 hash.':'Approving authorizes this exact proposed action only. Any change to the action parameters requires a new approval.'}</div>
+      <label style="font-size:.8rem">Approval comment (required to reject):<br/><textarea id="appr-modal-msg" rows="2" style="width:100%;box-sizing:border-box;background:#101010;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px"></textarea></label>
+      <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
+        <button class="sim-btn" onclick="closeApprovalModal()">Cancel</button>
+        <button class="btn btn-danger" onclick="modalDecide('${esc(approval_id)}',false,'${esc(a.incident_id||'')}',${isCode?'true':'false'})">Reject</button>
+        <button class="btn btn-primary" onclick="modalDecide('${esc(approval_id)}',true,'${esc(a.incident_id||'')}',${isCode?'true':'false'})">Approve Action</button>
+      </div>`;
+    const ta=document.getElementById('appr-modal-msg');
+    if(ta) ta.focus();
+  }catch(e){ body.innerHTML='<span style="color:var(--accent-red)">Could not load approval.</span>'; }
+}
+function closeApprovalModal(){ document.getElementById('approval-modal').classList.remove('open'); }
+async function modalDecide(approval_id, approve, incident_id, isCode){
+  const msg=((document.getElementById('appr-modal-msg')||{}).value||'').trim();
+  if(!approve&&!msg){ alert('A rejection comment is required.'); return; }
+  const body=JSON.stringify({message:msg});
+  const headers={'Content-Type':'application/json'};
+  let url, r;
+  if(isCode){
+    url='/api/incidents/'+incident_id+(approve?'/fix/approve':'/fix/reject');
+    r=await fetch(url,{method:'POST',headers,body});
+  } else {
+    url='/api/approvals/'+approval_id+(approve?'/approve':'/reject');
+    r=await fetch(url,{method:'POST',headers,body});
+  }
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){ alert((approve?'Approve':'Reject')+' failed: '+(d.detail||r.status)); return; }
+  closeApprovalModal();
+  fetchLogs();
+  if(isCode&&window.refreshFixStatus) refreshFixStatus();
+}
+function renderTimelineSection(incident_id, view){
+  view=view||'significant';
+  let host=document.getElementById('incident-timeline-section');
+  if(!host){
+    host=document.createElement('div');
+    host.id='incident-timeline-section';
+    host.className='card';
+    host.style.marginBottom='20px';
+    const out=document.getElementById('rca-output');
+    out.parentNode.insertBefore(host, out.nextSibling);
+  }
+  host.innerHTML='<div class="card-title">Incident Timeline</div><span style="color:var(--text-muted);font-size:.8rem">Loading…</span>';
+  fetch('/api/incidents/'+incident_id+'/timeline?view='+view).then(r=>r.json()).then(d=>{
+    const legacy=document.getElementById('rc-timeline');
+    if(legacy&&legacy.parentElement) legacy.parentElement.style.display='none';
+    const groups=(d.groups||[]).filter(g=>g.count>1);
+    const singles=(d.events||[]).filter(e=>e.kind==='event');
+    let html=`<div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">`+
+      `<button class="sim-btn" onclick="renderTimelineSection('${esc(incident_id)}','${view==='significant'?'all':'significant'}')">${view==='significant'?'Show all events':'Show significant only'}</button>`+
+      `<button class="sim-btn" onclick="openRawDrawer()">View Raw Evidence</button>`+
+      `<span style="font-size:.76rem;color:var(--text-muted)">${d.total_events} event(s)${view==='significant'?' · grouped':''}</span></div>`;
+    html+=singles.map(e=>`<div style="padding:6px 0;border-bottom:1px solid var(--border-color);font-size:.84rem"><strong>${esc((e.timestamp||'').slice(11,19))}</strong> ${esc(e.title||'')} <span style="color:var(--text-muted)">[${esc(e.event_type||'')}]</span><br/><span style="color:var(--text-muted)">${esc(e.description||'').slice(0,160)}</span></div>`).join('');
+    html+=groups.map((g,i)=>{
+      const attrs=Object.entries(g.attributes||{}).map(([k,v])=>`<dt>${esc(String(k).replace(/_/g,' '))}</dt><dd>${esc(v)}</dd>`).join('');
+      return `<details class="tl-group"${i===0?' open':''}><summary><strong>${esc(g.title)}</strong> <span style="color:var(--text-muted)">${esc((g.first||'').slice(11,19))} – ${esc((g.last||'').slice(11,19))} · ${g.count} occurrences</span></summary><div style="padding:0 14px 12px"><dl class="tl-attrs">${attrs}</dl><div style="margin-top:6px"><button class="sim-btn" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">Expand ${g.count} events</button><div style="display:none;margin-top:6px;font-size:.76rem;color:var(--text-muted)">${esc(g.first)} to ${esc(g.last)} · ${esc(g.event_type||'')}</div></div></div></details>`;
+    }).join('');
+    if(!singles.length&&!groups.length) html+='<span style="color:var(--text-muted)">No timeline events.</span>';
+    host.innerHTML='<div class="card-title">Incident Timeline</div>'+html;
+  }).catch(()=>{ host.innerHTML='<div class="card-title">Incident Timeline</div><span style="color:var(--text-muted)">Timeline unavailable.</span>'; });
+}
+async function openRawDrawer(){
+  if(!LAST_INCIDENT){ alert('Run RCA first'); return; }
+  const veil=document.getElementById('raw-modal');
+  veil.classList.add('open');
+  const body=document.getElementById('raw-modal-body');
+  body.innerHTML='<span style="color:var(--text-muted)">Loading raw evidence…</span>';
+  try{
+    const d=await (await fetch('/api/incidents/'+LAST_INCIDENT+'/evidence/raw?limit=100')).json();
+    const sec=(t,v)=>`<details class="tl-group"><summary><strong>${t}</strong></summary><div style="padding:0 14px 12px"><pre style="background:#000;border:1px solid var(--border-color);border-radius:6px;padding:10px;max-height:300px;overflow:auto;font-size:.72rem;white-space:pre-wrap">${esc(JSON.stringify(v,null,2).slice(0,6000))}</pre></div></details>`;
+    body.innerHTML=`<h3 style="margin-top:0">View Raw Evidence</h3><div style="font-size:.78rem;color:var(--text-muted);margin-bottom:8px">Advanced debugging view. The human-readable RCA report above remains primary.</div>`+
+      sec('Raw logs ('+(d.raw_logs||[]).length+')',d.raw_logs)+sec('Metrics',d.metrics)+sec('Deployment events ('+(d.recent_deployments||[]).length+')',d.recent_deployments)+sec('Trace evidence ('+(d.traces||[]).length+')',d.traces)+sec('Agent finding objects ('+(d.agent_findings||[]).length+')',(d.agent_findings||[]).slice(0,20));
+  }catch(e){ body.innerHTML='<span style="color:var(--accent-red)">Raw evidence unavailable.</span>'; }
+}
+function closeRawDrawer(){ document.getElementById('raw-modal').classList.remove('open'); }
 function setCfBadge(text, ok){
   const b=document.getElementById('cf-status-badge'); b.innerText=text;
   b.className='badge '+(ok===true?'badge-green':(ok===false?'badge-red':'badge-yellow'));
@@ -909,6 +1073,7 @@ async function approveFixPR(){
 async function rejectFix(){
   if(!LAST_INCIDENT) return;
   const msg=document.getElementById('cf-msg').value.trim();
+  if(!msg){ alert('A rejection comment is required.'); document.getElementById('cf-msg').focus(); return; }
   if(!confirm('Reject this code fix?')) return;
   await fetch('/api/incidents/'+LAST_INCIDENT+'/fix/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
   await refreshFixStatus(); fetchLogs();
@@ -978,7 +1143,9 @@ function setCrumbs(items){
 function initRouter(){
   fetch('/health').then(r=>r.json()).then(h=>{
     const el=document.getElementById('build-stamp');
-    if(el) el.innerText='build ' + String(h.commit||h.version||'local').slice(0,7);
+    const tag=String(h.commit||h.version||'');
+    if(el&&(tag&&!['unknown','local','0.4.0'].includes(tag))) el.innerText='build ' + tag.slice(0,7);
+    else if(el) el.remove();
   }).catch(()=>{});
   syncFromHash();
 }
@@ -993,6 +1160,9 @@ function toggleSidebar(){
   }
 }
 document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    closeApprovalModal(); closeRawDrawer();
+  }
   if(e.key==='Escape'&&document.body.classList.contains('drawer-open')){
     document.body.classList.remove('drawer-open');
     const btn=document.querySelector('#topnav .hamb');
@@ -1168,15 +1338,21 @@ function renderEvidenceStructured(listEl, items, emptyText){
 function renderBlast(data){
   const el=document.getElementById('rc-blast'); if(!el) return;
   const b=data.blast_radius;
-  if(!b){ el.innerText='—'; return; }
-  if(typeof b==='string'){ el.innerText=b; return; }
-  const parts=[];
-  if(b.classification) parts.push(b.classification);
-  if(b.estimated_scope) parts.push(b.estimated_scope);
-  if(b.affected_services&&b.affected_services.length) parts.push('Services: '+b.affected_services.join(', '));
-  if(b.affected_endpoints&&b.affected_endpoints.length) parts.push('Endpoints: '+b.affected_endpoints.join(', '));
-  el.innerText=parts.join(' · ')||JSON.stringify(b);
+  if(!b){ el.innerHTML='—'; return; }
+  if(typeof b==='string'){ el.innerHTML=esc(b); return; }
+  const sev=humanize(b.classification||b.scope||'');
+  const services=b.affected_services||[];
+  const endpoints=b.affected_endpoints||[];
+  const impact=b.estimated_scope||b.summary||'';
+  const region=b.region||b.regional_scope||'';
+  let html=`<div><strong>Severity:</strong> ${esc(sev||'—')}</div>`;
+  if(services.length) html+=`<div style="margin-top:6px"><strong>Affected services:</strong><ul style="margin:4px 0;padding-left:18px">`+services.map(s=>`<li>${esc(s)}</li>`).join('')+`</ul></div>`;
+  if(endpoints.length) html+=`<div style="margin-top:6px"><strong>Affected endpoints:</strong><ul style="margin:4px 0;padding-left:18px">`+endpoints.map(s=>`<li>${esc(s)}</li>`).join('')+`</ul></div>`;
+  if(region) html+=`<div style="margin-top:6px"><strong>Region:</strong> ${esc(region)}</div>`;
+  if(impact) html+=`<div style="margin-top:6px"><strong>Impact:</strong> ${esc(impact)}</div>`;
+  el.innerHTML=html;
 }
+
 function renderRcExtras(data){
   if((!data.error_domain||data.error_domain==='Unknown')&&TAX&&TAX.categories&&data.root_cause_category){
     const t=TAX.categories[data.root_cause_category];
@@ -1186,13 +1362,37 @@ function renderRcExtras(data){
   if(dom) dom.innerHTML=`<strong>Domain:</strong> ${esc(data.error_domain||'Unknown')} · <strong>Subcategory:</strong> ${esc(data.error_subcategory||'Unknown')} · <strong>Source:</strong> ${esc(data.evidence_source||'live')}`;
   const why=document.getElementById('rc-why');
   if(why){
-    const hyps=(data.hypotheses||[]).slice(0,3);
-    const verdict={}; (data.validations||[]).forEach(v=>{verdict[v.hypothesis_id]=v.validation_status;});
-    why.innerHTML=hyps.length?('<strong>Why this conclusion:</strong>'+hyps.map(h=>`<div style="margin-top:4px">• <strong>${esc(h.root_cause_category)}</strong> (${Math.round((h.confidence_score||0)*100)}%, ${esc(verdict[h.hypothesis_id]||'unreviewed')}) — ${esc((h.reasoning_summary||'').slice(0,220))}</div>`).join('')):'';
+    const hyps=data.hypotheses||[];
+    const byId={}; hyps.forEach(h=>{byId[h.hypothesis_id]=h;});
+    const accepted=(data.validations||[]).filter(v=>v.accepted);
+    const rejected=(data.validations||[]).filter(v=>!v.accepted);
+    let html='<strong>Why this conclusion</strong>';
+    if(accepted.length){
+      html+=accepted.map(v=>{
+        const h=byId[v.hypothesis_id]||{};
+        const cat=h.root_cause_category||'';
+        const conf=Math.round(((v.adjusted_confidence!=null?v.adjusted_confidence:h.confidence_score)||0)*100);
+        return `<div style="margin-top:6px">✓ <strong>${esc(humanize(cat))}</strong><br/><span style="color:var(--text-muted)">Strongly supported · ${conf}%</span><br/>${esc(v.critic_reasoning||h.reasoning_summary||'')}${(v.contradictions&&v.contradictions.length)?'<br/><span style="color:var(--text-muted)">Noted caveats: '+esc(v.contradictions.join('; '))+'</span>':''}</div>`;
+      }).join('');
+    } else if(hyps.length){
+      const h=hyps[0];
+      html+=`<div style="margin-top:6px">✓ <strong>${esc(humanize(h.root_cause_category))}</strong><br/><span style="color:var(--text-muted)">${Math.round((h.confidence_score||0)*100)}%</span><br/>${esc(h.reasoning_summary||'')}</div>`;
+    } else {
+      html+=`<div style="margin-top:6px;color:var(--text-muted)">No hypothesis details available.</div>`;
+    }
+    if(rejected.length){
+      html+='<div style="margin-top:10px"><strong>Rejected alternatives</strong>'+rejected.map(v=>{
+        const h=byId[v.hypothesis_id]||{};
+        const conf=Math.round(((v.adjusted_confidence!=null?v.adjusted_confidence:h.confidence_score)||0)*100);
+        return `<div style="margin-top:6px">${esc(humanize(h.root_cause_category))}<br/><span style="color:var(--text-muted)">Rejected · ${conf}% — ${esc(v.critic_reasoning||'contradicted by evidence')}</span></div>`;
+      }).join('')+'</div>';
+    }
+    why.innerHTML=html;
   }
   renderEvidenceStructured('evidence-list', data.evidence||data.supporting_evidence||[], 'No supporting evidence cited.');
   renderEvidenceStructured('contra-list', data.contradictory_evidence||[], 'No meaningful contradictory evidence was identified.');
 }
+
 async function refreshWorkspaceExtras(incident_id){
   if(!incident_id) return;
   try{
@@ -1707,6 +1907,8 @@ def reject_request(approval_id: str, approver: str = "human-operator", body: dic
     msg = (body or {}).get("message", "") if isinstance(body, dict) else ""
     if isinstance(body, dict) and body.get("approver"):
         approver = body.get("approver")
+    if not (msg or "").strip():
+        raise HTTPException(status_code=400, detail="A rejection comment is required")
     req = global_approval_manager.reject(approval_id, approver=approver, message=msg)
     if not req:
         raise HTTPException(status_code=404, detail="Approval not found")
@@ -2102,10 +2304,13 @@ async def propose_remediation(incident_id: str):
         expected_impact=plan.expected_effect, rollback_plan=plan.rollback_plan
     )
     APPROVAL_PARAMS[approval.approval_id] = _suggest_infra_params(state.incident_evidence, plan.recommended_action)
+    from safety.remediation_policy import decide as _policy_decide
+    policy = _policy_decide(plan.recommended_action).value
     audit_log("REMEDIATION_PLANNED", incident_id, "web-user", plan.recommended_action,
               approval.target_resource, approval_id=approval.approval_id)
     return {"remediation_plan": plan.model_dump(), "approval": approval.model_dump(),
-            "suggested_params": APPROVAL_PARAMS[approval.approval_id]}
+            "suggested_params": APPROVAL_PARAMS[approval.approval_id],
+            "policy": policy}
 
 
 @app.get("/api/approvals/{approval_id}/live-traffic")
@@ -2144,6 +2349,53 @@ def approval_params(approval_id: str):
         raise HTTPException(status_code=404, detail="Approval not found")
     return {"approval_id": approval_id, "action": req.action,
             "status": req.status.value, "params": APPROVAL_PARAMS.get(approval_id, {})}
+
+
+@app.get("/api/incidents/{incident_id}/timeline")
+def incident_timeline(incident_id: str, view: str = "significant"):
+    """Timeline for the incident's stored investigation.
+
+    view=significant (default): milestones plus one grouped entry per repeated
+    error signature. view=all: every raw event. Grouping/parsing is
+    deterministic (tools/timeline_view.py).
+    """
+    from tools.timeline_view import group_events, significant
+    entry = LAST_INVESTIGATION.get(incident_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    events = [t.model_dump() for t in entry["state"].final_report.timeline]
+    if view == "all":
+        return {"incident_id": incident_id, "view": "all",
+                "total_events": len(events), "events": events}
+    groups = group_events(events)
+    sig = significant(events)
+    return {"incident_id": incident_id, "view": "significant",
+            "total_events": len(events), "groups": groups, "events": sig}
+
+
+@app.get("/api/incidents/{incident_id}/evidence/raw")
+def incident_raw_evidence(incident_id: str, limit: int = 100):
+    """Raw evidence drawer backing: logs, metrics, deployments, traces, agent
+    findings. Read-only; the human-readable RCA stays the primary report."""
+    entry = LAST_INVESTIGATION.get(incident_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    state = entry["state"]
+    ev = state.incident_evidence
+    cap = max(1, min(limit, 500))
+    return {
+        "incident_id": incident_id,
+        "raw_logs": (ev.raw_evidence or [])[:cap],
+        "application_errors": ev.application_errors or [],
+        "request_errors": (ev.request_errors or [])[:cap],
+        "metrics": {"latency": ev.latency or {}, "request_count": ev.request_count or {},
+                    "cpu_utilization": ev.cpu_utilization or {},
+                    "memory_utilization": ev.memory_utilization or {}},
+        "recent_deployments": ev.recent_deployments or [],
+        "traces": (ev.traces or [])[:cap],
+        "dependencies": ev.dependencies or [],
+        "agent_findings": [f.model_dump() for f in state.agent_findings[:cap]],
+    }
 
 
 @app.get("/api/approvals/{approval_id}/revisions")
@@ -2306,6 +2558,8 @@ def reject_fix(incident_id: str, body: dict = None):
     if not entry or not entry.get("approval_id"):
         raise HTTPException(status_code=404, detail="No pending code fix approval for this incident")
     msg = (body or {}).get("message", "") if isinstance(body, dict) else ""
+    if not (msg or "").strip():
+        raise HTTPException(status_code=400, detail="A rejection comment is required")
     req = global_approval_manager.reject(entry["approval_id"], message=msg)
     entry["job"].status = FixStatus.REJECTED
     audit_log("FIX_REJECTED", incident_id, "human-operator", "code_fix_pr",
