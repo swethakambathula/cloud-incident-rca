@@ -3793,4 +3793,153 @@ def code_investigation_view(incident_id: str):
             "related_tests": [f.related_test for f in inv.findings if f.related_test]}
 
 
+# ================= Investigation platform (Phase 1: explainability) =================
+# All views derive from stored RCA structures — no parallel representations.
+
+
+def _inv_ctx(incident_id: str) -> dict:
+    from projects.store import PRRegistry
+    from memory.store import MemoryStore
+    rec = _registry().get(incident_id) or {"incident_id": incident_id}
+    entry = LAST_INVESTIGATION.get(incident_id) or {}
+    state = entry.get("state")
+    rca = LAST_RCA.get(incident_id, {})
+    fix_entry = FIX_JOBS.get(incident_id) or {}
+    approvals = []
+    try:
+        for req in global_approval_manager._store.values():
+            if req.incident_id == incident_id:
+                approvals.append(req.model_dump())
+    except Exception:
+        approvals = []
+    prs = []
+    try:
+        prs = [r.model_dump() for r in PRRegistry().by_incident(incident_id)]
+    except Exception:
+        prs = []
+    verification = {}
+    try:
+        mem = MemoryStore(use_bigquery=False).get(incident_id) or {}
+        verification = mem.get("verification_result") or {}
+    except Exception:
+        verification = {}
+    return {"rec": rec, "state": state, "rca": rca, "fix_entry": fix_entry,
+            "approvals": approvals, "prs": prs, "verification": verification}
+
+
+@app.get("/api/incidents/{incident_id}/investigation-graph")
+def investigation_graph(incident_id: str):
+    from tools.investigation import build_graph
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    graph = build_graph(incident_id, ctx["rec"], ctx["state"], ctx["rca"],
+                        ctx["fix_entry"], ctx["approvals"], ctx["prs"],
+                        ctx["verification"])
+    # Evidence-to-conclusion path: supporting evidence -> accepted hypothesis -> root cause -> code/fix/approval/pr/verification
+    by_id = {n.id: n for n in graph.nodes}
+    accepted = [n.id for n in graph.nodes if n.type == "HYPOTHESIS" and n.status == "accepted"]
+    path = ["incident"]
+    if accepted:
+        supporters = sorted({e.from_id for e in graph.edges
+                             if e.to_id == accepted[0] and e.relationship == "SUPPORTS"})
+        path += supporters + [accepted[0], "root-cause"]
+    for nid in ("code-1", "fix"):
+        if nid in by_id:
+            path.append(nid)
+    path += [n.id for n in graph.nodes if n.type in ("APPROVAL", "PR")]
+    if "verification" in by_id:
+        path.append("verification")
+    out = graph.model_dump(by_alias=True)
+    out["support_path"] = [p for p in path if p in by_id]
+    return out
+
+
+@app.get("/api/incidents/{incident_id}/why")
+def investigation_why(incident_id: str):
+    from tools.investigation import why_this
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    return why_this(ctx["state"], ctx["rca"]).model_dump()
+
+
+@app.get("/api/incidents/{incident_id}/agent-findings")
+def investigation_agent_findings(incident_id: str):
+    from tools.investigation import agent_findings_view
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    return {"incident_id": incident_id,
+            "findings": [f.model_dump() for f in agent_findings_view(ctx["state"])]}
+
+
+@app.get("/api/incidents/{incident_id}/confidence-history")
+def investigation_confidence(incident_id: str):
+    from tools.investigation import confidence_evolution
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    return {"incident_id": incident_id,
+            "snapshots": [s.model_dump() for s in confidence_evolution(ctx["state"])]}
+
+
+@app.get("/api/incidents/{incident_id}/quality-score")
+def investigation_quality(incident_id: str):
+    from tools.investigation import quality_score
+    from tools.evidence_completeness import completeness
+    from orchestration.attachments import AttachmentStore
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    rec, state = ctx["rec"], ctx["state"]
+    try:
+        project = (_projects().get(rec.get("project_id", "")) or
+                   _projects().get("checkout-platform"))
+        project = project.model_dump() if project else {}
+    except Exception:
+        project = {}
+    atts = AttachmentStore().list(incident_id)
+    comp = completeness(rec, atts, project, len(rec.get("rca_runs", [])))
+    inv = (ctx["fix_entry"] or {}).get("investigation") or {}
+    findings = inv.get("findings", []) or []
+    strong = any(str(f.get("reason", "")).startswith("Stack trace points to") for f in findings)
+    repo_connected = bool((project or {}).get("repository_url") or (project or {}).get("local_path"))
+    supporting = " ".join(
+        (getattr(getattr(state, "final_report", None), "supporting_evidence", []) or [])).lower()
+    deps_exist = bool(getattr(getattr(state, "incident_evidence", None), "recent_deployments", []) or [])
+    dep_ref = deps_exist and any(k in supporting for k in ("revision", "deplo", "commit"))
+    similar = 0
+    try:
+        from memory.retrieval import find_similar_incidents
+        from memory.store import MemoryStore
+        ev = getattr(state, "incident_evidence", None)
+        similar = len(find_similar_incidents(
+            service=getattr(ev, "service_name", "") if ev is not None else "",
+            symptoms=list(getattr(getattr(state, "final_report", None), "primary_symptoms", []) or [])[:3],
+            root_cause_category=ctx["rca"].get("root_cause_category", ""),
+            limit=5, store=MemoryStore(use_bigquery=False)))
+    except Exception:
+        similar = 0
+    score = quality_score(state, float(ctx["rca"].get("confidence", 0) or 0),
+                          comp.get("percent", 0), bool(findings), strong,
+                          repo_connected, similar, dep_ref, deps_exist)
+    return {"incident_id": incident_id, **score.model_dump()}
+
+
+@app.post("/api/incidents/{incident_id}/challenge")
+def investigation_challenge(incident_id: str, body: dict):
+    from tools.investigation import challenge_answer
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    question = (body or {}).get("question", "")
+    if not question.strip():
+        raise HTTPException(status_code=400, detail="question is required")
+    code_findings = ((ctx["fix_entry"] or {}).get("investigation") or {}).get("findings", []) or []
+    missing = list(getattr(ctx["state"], "missing_evidence", []) or [])
+    ans = challenge_answer(question, ctx["state"], ctx["rca"], code_findings, missing)
+    return {"incident_id": incident_id, "question": question, **ans.model_dump()}
+
+
 # Keep original analyze endpoint
