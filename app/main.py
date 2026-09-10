@@ -81,7 +81,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .incident-card{background:var(--card-bg);border:1px solid var(--border-color);padding:12px 14px;border-radius:8px;cursor:pointer;transition:.2s}
         .incident-card:hover,.incident-card.active{border-color:var(--accent-cyan);transform:translateY(-2px);box-shadow:0 4px 14px rgba(6,182,212,.2)}
         .incident-card h4{font-size:.88rem;margin-bottom:4px} .incident-card p{font-size:.75rem;color:var(--text-muted)}
-        .main-content{flex:1;padding:24px 32px;overflow-y:auto}
+        .main-content{flex:1;min-width:0;padding:24px 32px;overflow-y:auto;overflow-x:hidden}
+        .card,.item-box,.evidence-box,.log-panel{min-width:0;overflow-wrap:anywhere}
+        pre{max-width:100%;overflow-x:auto}
+        @media (max-width: 900px){
+            body{flex-direction:column}
+            .sidebar{width:100%;max-height:38vh;border-right:none;border-bottom:1px solid var(--border-color)}
+            .main-content{padding:14px 12px}
+            .grid{grid-template-columns:1fr}
+            .header{flex-direction:column;align-items:flex-start}
+            .log-panel{height:200px}
+        }
         .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border-color);flex-wrap:wrap;gap:12px}
         .btn{background:linear-gradient(135deg,var(--accent-cyan),var(--accent-purple));color:#fff;border:none;padding:10px 18px;border-radius:6px;font-weight:600;cursor:pointer}
         .btn:disabled{opacity:.5;cursor:not-allowed} .btn-red{background:linear-gradient(135deg,#ef4444,#dc2626)} .btn-green{background:linear-gradient(135deg,#10b981,#059669)}
