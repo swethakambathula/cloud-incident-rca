@@ -217,7 +217,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         #approval-box details.appr summary::-webkit-details-marker{display:none}
         #app.collapsed .sidebar{display:none}
         @keyframes sk{0%{opacity:.5}50%{opacity:1}100%{opacity:.5}}
-        .metric-chip{background:#000;border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;font-size:.78rem}
+        .metric-chip{background:var(--surface-secondary);color:var(--text-primary);border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;font-size:.78rem}
         .metric-chip strong{font-size:1rem;display:block}
         .metric-chip.over{border-color:var(--warning)}
         details.sim-group{border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px;background:#0d0d0d}
@@ -391,7 +391,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <button class="sim-btn" id="copy-logs-btn" onclick="copyLogs()" title="Copy visible logs" style="margin-left:auto">Copy</button>
                     <button class="sim-btn" id="pause-btn" onclick="togglePause()" style="margin-left:auto">Pause</button>
                 </div>
-                <div id="log-summary" style="display:flex;flex-wrap:wrap;gap:14px;font-size:.78rem;color:var(--text-muted);margin-bottom:8px;padding:8px 10px;background:#000000;border:1px solid var(--border-color);border-radius:6px">No data yet — simulate an incident.</div>
+                <div id="log-summary" class="well" style="display:flex;flex-wrap:wrap;gap:14px;font-size:.78rem;margin-bottom:8px;padding:8px 10px">No data yet — simulate an incident.</div>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:center;font-size:.78rem">
                     <select id="f-service" onchange="renderLogs()" style="background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All services</option></select>
                     <select id="f-severity" onchange="renderLogs()" style="background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 6px"><option value="">All severities</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option><option>CRITICAL</option></select>
