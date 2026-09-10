@@ -126,6 +126,19 @@ def test_challenge_requires_question(rca_incident):
     assert c.post(f"/api/incidents/{iid}/challenge", json={"question": "  "}).status_code == 400
 
 
+def test_investigation_ui_shell():
+    c = TestClient(app)
+    html = c.get("/").text
+    for token in ["inc-hero", "inv-tabs", "sec-inv", "inv-graph",
+                  "inv-node-detail", "inv-why", "inv-agents", "inv-conf",
+                  "inv-quality", "challenge-q", "sec-timeline",
+                  "switchInvTab", "renderGraph", "submitChallenge"]:
+        assert token in html, f"missing {token}"
+    for tab in ["summary", "investigation", "evidence", "timeline",
+                "remediation", "approvals", "activity"]:
+        assert f"switchInvTab('{tab}')" in html
+
+
 def test_investigation_endpoints_need_rca():
     c = TestClient(app)
     for path in ("investigation-graph", "why", "agent-findings",

@@ -193,6 +193,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .wiz-steps span{flex:1;text-align:center;font-size:.7rem;padding:6px;border-radius:6px;background:#141414;color:var(--text-muted)}
         .wiz-steps span.on{background:#262626;color:#fff;border:1px solid #4a4a4a}
         .tabs{display:flex;gap:6px;margin:12px 0;flex-wrap:wrap}
+        .hero-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+        .hero-stat{background:var(--surface-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;font-size:.78rem;min-width:130px}
+        .hero-stat strong{font-size:1rem;display:block}
+        .gnode{cursor:pointer}
+        .gnode rect{fill:#20242a;stroke:#4a4a4a;stroke-width:1}
+        .gnode text{fill:var(--text-main);font-size:11px}
+        .gnode.key rect{stroke:#d9d9d9;stroke-width:2.5}
+        .gnode.dim{opacity:.25}
+        .gnode.lit rect{stroke:#fff;stroke-width:2.5}
+        .gedge{stroke:#5a5f66;stroke-width:1.2}
+        .gedge.contra{stroke:#c0564d;stroke-dasharray:5 4}
+        .gedge.lit{stroke:#fff;stroke-width:2.5}
+        .gedge.dim{opacity:.2}
+        .conf-bar{height:8px;border-radius:4px;background:#141414;margin:4px 0;position:relative}
+        .conf-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:linear-gradient(90deg,#6a6a6a,#d9d9d9)}
+        body.present #topnav,body.present .sidebar,body.present #crumbs,body.present #wf-stepper,body.present #inv-tabs{display:none}
+        body.present #app{grid-template-columns:minmax(0,1fr)}
+        body.present .view.active{max-width:1100px}
         .tabs button{padding:7px 12px;border-radius:6px;border:1px solid var(--border-color);background:#20242a;color:var(--text-muted);cursor:pointer;font-size:.8rem}
         .tabs button.on{background:#262626;color:#fff;border-color:#4a4a4a}
         .btn:active{transform:translateY(1px)}
@@ -349,6 +367,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <button class="btn btn-green" id="rca-btn-top" onclick="runLiveRCA()" style="display:none">🧠 Do RCA (Live)</button>
         </div>
         <div id="wf-stepper" class="stepper" aria-label="RCA workflow progress"></div>
+        <div id="inc-hero" class="card" style="margin-bottom:12px;display:none"></div>
+        <div class="tabs" id="inv-tabs" role="tablist" aria-label="Incident detail tabs" style="display:none">
+            <button data-tab="summary" class="on" onclick="switchInvTab('summary')" role="tab">Summary</button>
+            <button data-tab="investigation" onclick="switchInvTab('investigation')" role="tab">Investigation</button>
+            <button data-tab="evidence" onclick="switchInvTab('evidence')" role="tab">Evidence</button>
+            <button data-tab="timeline" onclick="switchInvTab('timeline')" role="tab">Timeline</button>
+            <button data-tab="remediation" onclick="switchInvTab('remediation')" role="tab">Remediation</button>
+            <button data-tab="approvals" onclick="switchInvTab('approvals')" role="tab">Approvals</button>
+            <button data-tab="activity" onclick="switchInvTab('activity')" role="tab">Activity</button>
+        </div>
         <div class="card" style="margin-bottom:16px">
             <div class="card-title">1 · Create / Simulate Incident</div>
             <details class="sim-group" open>
@@ -387,7 +415,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
             <span id="live-status" style="margin-left:auto;font-size:.78rem;color:var(--text-muted)"><span class="status-dot dot-green"></span>Live</span>
         </div>
-        <div class="grid">
+        <div class="grid" id="sec-live">
             <div class="card" style="grid-column: span 2;">
                 <div class="card-title">📡 Live Logs <span style="font-size:.75rem;color:var(--text-muted);font-weight:400">2 · Live Telemetry — auto-refresh, click Simulate to inject</span>
                     <button class="sim-btn" id="copy-logs-btn" onclick="copyLogs()" title="Copy visible logs" style="margin-left:auto">Copy</button>
@@ -458,16 +486,45 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
         </div>
-            <div class="grid">
+        <div id="sec-inv" style="display:none">
+            <div class="card"><div class="card-title">🕸 Investigation Graph <span style="font-size:.72rem;color:var(--text-muted);font-weight:400">how the conclusion was reached — click any node</span>
+                <span style="margin-left:auto;display:flex;gap:6px">
+                    <button class="sim-btn" onclick="graphZoom(-1)">−</button>
+                    <button class="sim-btn" onclick="graphZoom(1)">+</button>
+                    <button class="sim-btn" onclick="graphFit()">Fit</button>
+                    <button class="sim-btn" onclick="highlightSupportPath()">Show Evidence Path</button>
+                </span></div>
+                <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(240px,.8fr);gap:12px">
+                    <div id="inv-graph" style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden;min-height:320px"></div>
+                    <div id="inv-node-detail" style="font-size:.8rem"><p style="color:var(--text-muted)">Select a node to inspect its evidence.</p></div>
+                </div>
+            </div>
+            <div class="rca-grid">
+                <div class="card"><div class="card-title">❓ Why This / Why Not</div><div id="inv-why"></div></div>
+                <div class="card"><div class="card-title">🤖 Agent Findings</div><div id="inv-agents"></div></div>
+            </div>
+            <div class="rca-grid">
+                <div class="card"><div class="card-title">📈 Confidence Evolution</div><div id="inv-conf"></div></div>
+                <div class="card"><div class="card-title">🏅 Investigation Quality</div><div id="inv-quality"></div></div>
+            </div>
+            <div class="card"><div class="card-title">🛡 Challenge RCA <span style="font-size:.72rem;color:var(--text-muted);font-weight:400">answers use only collected incident evidence</span></div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px" id="challenge-suggest"></div>
+                <div style="display:flex;gap:6px"><input id="challenge-q" placeholder="Why do you think this is not a database outage?" aria-label="Challenge the RCA conclusion" style="flex:1;background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px" /><button class="btn btn-primary" onclick="submitChallenge()">Ask</button></div>
+                <div id="challenge-a" style="margin-top:8px"></div>
+            </div>
+        </div>
+        <div id="sec-timeline" style="display:none"><div class="card"><div class="card-title">⏱ Incident Timeline</div><div id="inv-timeline"></div></div></div>
+            <div class="grid" id="sec-gov">
                 <div class="card"><div class="card-title">Approval Timeline</div><div id="approval-timeline"><span style="color:var(--text-muted);font-size:.8rem">No approval events yet.</span></div></div>
                 <div class="card"><div class="card-title">Related Pull Request</div><div id="related-pr"><span style="font-size:.8rem;color:var(--text-muted)">No pull request raised for this incident.</span></div></div>
             </div>
-            <div class="grid">
+            <div class="grid" id="sec-meta">
                 <div class="card"><div class="card-title">RCA Runs</div><div id="rca-runs"><span style="font-size:.8rem;color:var(--text-muted)">No runs yet.</span></div></div>
                 <div class="card"><div class="card-title">Incident Notes</div><div id="notes-list"></div>
                     <div style="display:flex;gap:6px;margin-top:8px"><input id="note-input" placeholder="Add a note…" aria-label="Add incident note" style="flex:1;background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px" /><button class="sim-btn" onclick="addNote()">Add</button></div>
                 </div>
             </div>
+            <div class="card" id="sec-activity" style="display:none"><div class="card-title">📋 Audit Activity</div><div id="incident-activity"></div></div>
         </div>
                 </div>
 <div id="view-home" class="view">
@@ -857,6 +914,7 @@ async function runLiveRCA(){
   if(data.approval){ const ap=data.approval; _lastApprSig=ap.approval_id+':'+ap.status; document.getElementById('approval-box').innerHTML=_approvalCard(ap,true); const inp=document.getElementById('msg-'+ap.approval_id); if(inp) inp.focus(); }
   btn.disabled=false; btn.innerText='Run Live RCA';
   fetchLogs();
+  if(data.incident_id||LAST_INCIDENT){ const _iid=data.incident_id||LAST_INCIDENT; renderHero(_iid); if(INV_TAB==='investigation'||INV_TAB==='summary') loadInvestigation(_iid); }
   if(useLive&&data.incident_id){
     // Code fix stays fully explicit: show the panel with a hint, create nothing.
     document.getElementById('codefix-output').style.display='block';
@@ -1301,6 +1359,9 @@ async function openIncident(incident_id){
   LAST_INCIDENT=incident_id;
   document.getElementById('incidents-table-wrap').style.display='none';
   document.getElementById('incident-workspace').style.display='block';
+  document.getElementById('inv-tabs').style.display='flex';
+  renderHero(incident_id);
+  switchInvTab('summary');
   setCrumbs([['Home',()=>go('home')],['Incidents',()=>{go('incidents');}],[incident_id,null]]);
   if(meta&&meta.file){ await analyzeStatic(meta.file); }
   else{
@@ -1418,6 +1479,156 @@ async function createManual(){
   if(!r.ok){ out.innerText=d.detail||'creation failed'; return; }
   out.innerText='Created '+d.incident_id;
   await openIncident(d.incident_id);
+}
+/* ---- investigation platform: tabs, hero, graph, why, challenge ---- */
+let INV_TAB='summary', INV_GRAPH=null, GRAPH_ZOOM=1, GRAPH_PAN={x:0,y:0};
+const INV_TABS={summary:['inc-hero','rca-output'],investigation:['sec-inv'],evidence:['sec-live'],timeline:['sec-timeline'],remediation:['codefix-output'],approvals:['sec-gov'],activity:['sec-meta','sec-activity']};
+function switchInvTab(name){
+  INV_TAB=name;
+  document.querySelectorAll('#inv-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===name));
+  const show=new Set(INV_TABS[name]||[]);
+  ['inc-hero','rca-output','sec-inv','sec-live','sec-timeline','codefix-output','sec-gov','sec-meta','sec-activity'].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    el.style.display=show.has(id)?'':'none';
+  });
+  if(name==='investigation'&&LAST_INCIDENT) loadInvestigation(LAST_INCIDENT);
+  if(name==='timeline'&&LAST_INCIDENT) loadInvTimeline(LAST_INCIDENT);
+  if(name==='activity'&&LAST_INCIDENT) loadInvActivity(LAST_INCIDENT);
+}
+async function renderHero(incident_id){
+  const box=document.getElementById('inc-hero'); if(!box) return;
+  try{
+    const d=await (await fetch('/api/incidents/'+incident_id)).json();
+    const inc=d.incident||{};
+    let quality=null, why=null;
+    try{ quality=await (await fetch('/api/incidents/'+incident_id+'/quality-score')).json(); }catch(e){}
+    try{ why=await (await fetch('/api/incidents/'+incident_id+'/why')).json(); }catch(e){}
+    const conf=Math.round(((why&&why.confidence)||0)*100);
+    const q=quality?Math.round(quality.score):null;
+    const prs=d.pull_requests||[];
+    box.style.display='block';
+    box.innerHTML=`<div class="card-title">${esc(incident_id)} · ${esc(inc.title||'')}</div>
+      <div style="font-size:.8rem;color:var(--text-muted)">${esc(inc.severity||'')} · ${esc(inc.environment||'')} · ${esc((inc.services||[]).join(', '))} · Status: ${esc(inc.status||'')}</div>
+      <div class="hero-stats">
+        <div class="hero-stat">Root Cause<strong>${esc((why&&why.conclusion||'Pending RCA').slice(0,40))}</strong></div>
+        <div class="hero-stat">Confidence<strong>${conf?conf+'%':'—'}</strong></div>
+        <div class="hero-stat">Investigation Quality<strong>${q!=null?q+' / 100':'—'}</strong></div>
+        <div class="hero-stat">Repository<strong>${esc(d.project&&(d.project.repository_url||d.project.local_path)?'Connected':'Not connected')}</strong></div>
+        <div class="hero-stat">PR<strong>${prs.length?esc(prs[0].pr_id+' · '+prs[0].status):'Not created'}</strong></div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="sim-btn" onclick="switchInvTab('investigation')">Open Investigation</button>
+        <button class="sim-btn" onclick="highlightSupportPath()">Show Evidence Path</button>
+        <button class="sim-btn" onclick="document.body.classList.toggle('present')">Toggle Presentation Mode</button>
+      </div>`;
+  }catch(e){ box.style.display='none'; }
+}
+async function loadInvestigation(incident_id){
+  const has=(id)=>!!document.getElementById(id);
+  try{
+    const g=await (await fetch('/api/incidents/'+incident_id+'/investigation-graph')).json();
+    INV_GRAPH=g; renderGraph(g);
+  }catch(e){ if(has('inv-graph')) document.getElementById('inv-graph').innerHTML='<p style="color:var(--text-muted)">Run RCA to build the investigation graph.</p>'; }
+  try{
+    const w=await (await fetch('/api/incidents/'+incident_id+'/why')).json();
+    if(has('inv-why')) document.getElementById('inv-why').innerHTML=
+      `<div><strong>Why this conclusion?</strong>${(w.reasons||[]).map(r=>`<div class="evidence-box">✓ ${esc(r)}</div>`).join('')||'<p>—</p>'}</div>`+
+      (w.rejected&&w.rejected.length?`<div style="margin-top:8px"><strong>Why not alternatives?</strong>`+w.rejected.map(r=>`<div class="evidence-box"><strong>${esc(r.category||r.hypothesis)}</strong> — ${esc(r.status)}<br/><span style="color:var(--text-muted)">${esc(r.reason)}</span></div>`).join('')+`</div>`:'');
+  }catch(e){}
+  try{
+    const a=await (await fetch('/api/incidents/'+incident_id+'/agent-findings')).json();
+    if(has('inv-agents')) document.getElementById('inv-agents').innerHTML=(a.findings||[]).map(f=>`<div class="evidence-box"><strong>${esc(f.agent)}</strong> <span class="pill info">${esc(f.verdict||f.strength)}</span><br/>${esc(f.summary)}<br/><span style="font-size:.72rem;color:var(--text-muted)">${f.evidence_count} evidence item(s) · confidence ${Math.round((f.confidence||0)*100)}%</span></div>`).join('')||'<p>—</p>';
+  }catch(e){}
+  try{
+    const ch=await (await fetch('/api/incidents/'+incident_id+'/confidence-history')).json();
+    if(has('inv-conf')) document.getElementById('inv-conf').innerHTML=(ch.snapshots||[]).map(s=>`<div style="margin-bottom:8px"><strong>${esc(s.stage)}</strong> — ${Math.round(s.confidence*100)}%<div class="conf-bar"><i style="width:${Math.round(s.confidence*100)}%"></i></div><span style="font-size:.75rem;color:var(--text-muted)">${esc(s.reason)}</span></div>`).join('')||'<p>—</p>';
+  }catch(e){}
+  try{
+    const q=await (await fetch('/api/incidents/'+incident_id+'/quality-score')).json();
+    if(has('inv-quality')) document.getElementById('inv-quality').innerHTML=
+      `<div style="font-size:1.4rem;font-weight:700">${Math.round(q.score)}<span style="font-size:.8rem;color:var(--text-muted)"> / 100</span></div>`+
+      (q.factors||[]).map(f=>`<div style="font-size:.78rem;margin-top:4px">${esc(f.name)}: <strong>${f.points}/${f.max_points}</strong> <span style="color:var(--text-muted)">(${esc(f.status)})</span><br/><span style="color:var(--text-muted)">${esc(f.note)}</span></div>`).join('')+
+      (q.deductions&&q.deductions.length?`<div style="margin-top:6px;font-size:.76rem;color:var(--text-muted)"><strong>Deductions:</strong><br/>${q.deductions.map(esc).join('<br/>')}</div>`:'');
+  }catch(e){}
+  const sug=document.getElementById('challenge-suggest');
+  if(sug) sug.innerHTML=['Why do you think this is not a database outage?','What evidence points to the deployment?','Why are you blaming this file?','What would lower your confidence?','Could this be traffic overload?'].map(q=>`<button class="sim-btn" onclick="document.getElementById('challenge-q').value='${q.replace(/'/g,"")}';submitChallenge()">${esc(q)}</button>`).join('');
+}
+function renderGraph(g){
+  const box=document.getElementById('inv-graph'); if(!box||!g) return;
+  const layers=['INCIDENT','EVIDENCE','DEPLOYMENT','AGENT','HYPOTHESIS','CODE','ROOT_CAUSE','FIX','APPROVAL','PR','VERIFICATION'];
+  const byLayer={}; layers.forEach(l=>byLayer[l]=[]);
+  g.nodes.forEach(n=>{(byLayer[n.type]||byLayer.EVIDENCE).push(n);});
+  const W=1100, rowH=64, colW=W/Math.max(1,layers.filter(l=>byLayer[l].length).length);
+  let li=0; const pos={};
+  layers.forEach(l=>{
+    const arr=byLayer[l]; if(!arr.length) return;
+    arr.forEach((n,i)=>{ pos[n.id]={x:li*colW+14, y:20+i*rowH, w:colW-28, h:46}; });
+    li++;
+  });
+  const H=Math.max(320, Math.max(...Object.values(pos).map(p=>p.y+p.h))+20);
+  let svg=`<svg id="inv-svg" width="100%" height="${H}" viewBox="${GRAPH_PAN.x} ${GRAPH_PAN.y} ${W/GRAPH_ZOOM} ${H/GRAPH_ZOOM}" style="background:#0d0d0d" role="img" aria-label="Investigation graph">`;
+  const edgeCls=e=>e.relationship==='CONTRADICTS'?'gedge contra':'gedge';
+  g.edges.forEach((e,i)=>{
+    const a=pos[e.from], b=pos[e.to]; if(!a||!b) return;
+    const x1=a.x+a.w, y1=a.y+a.h/2, x2=b.x, y2=b.y+b.h/2;
+    svg+=`<line class="${edgeCls(e)}" data-e="${i}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"><title>${esc(e.relationship)}</title></line>`;
+  });
+  g.nodes.forEach(n=>{
+    const p=pos[n.id]; if(!p) return;
+    const key=(n.type==='ROOT_CAUSE'||n.type==='FIX'||n.type==='PR')?'gnode key':'gnode';
+    svg+=`<g class="${key}" data-n="${esc(n.id)}" onclick="selectGraphNode('${esc(n.id)}')"><rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="8"/><text x="${p.x+8}" y="${p.y+18}">${esc(n.type.replace('_',' '))}</text><text x="${p.x+8}" y="${p.y+34}">${esc((n.label||'').slice(0,26))}</text></g>`;
+  });
+  svg+='</svg>';
+  box.innerHTML=svg;
+  enableGraphPan();
+}
+function graphNodeById(id){ return (INV_GRAPH&&INV_GRAPH.nodes||[]).find(n=>n.id===id); }
+function selectGraphNode(id){
+  const n=graphNodeById(id); if(!n) return;
+  document.querySelectorAll('#inv-svg .gnode').forEach(g=>g.classList.toggle('lit',g.dataset.n===id));
+  const m=n.metadata||{};
+  const rows=Object.entries(m).filter(([,v])=>v!==''&&v!=null).slice(0,12).map(([k,v])=>`<div><strong>${esc(k)}:</strong> ${esc(Array.isArray(v)?v.slice(0,4).join(', '):String(v)).slice(0,300)}</div>`).join('');
+  document.getElementById('inv-node-detail').innerHTML=`<strong>${esc(n.type)}</strong> ${n.confidence!=null?'<span class="pill info">'+Math.round(n.confidence*100)+'%</span>':''} ${n.status?statusPill(n.status):''}<div style="margin:6px 0">${esc(n.label)}</div>${rows}`;
+}
+function highlightSupportPath(){
+  if(!INV_GRAPH) return;
+  const path=new Set(INV_GRAPH.support_path||[]);
+  switchInvTab('investigation');
+  setTimeout(()=>{
+    document.querySelectorAll('#inv-svg .gnode').forEach(g=>{g.classList.toggle('lit',path.has(g.dataset.n));g.classList.toggle('dim',!path.has(g.dataset.n));});
+  },150);
+}
+function graphZoom(d){ GRAPH_ZOOM=Math.min(3,Math.max(0.5,GRAPH_ZOOM+d*0.25)); if(INV_GRAPH) renderGraph(INV_GRAPH); }
+function graphFit(){ GRAPH_ZOOM=1; GRAPH_PAN={x:0,y:0}; if(INV_GRAPH) renderGraph(INV_GRAPH); }
+function enableGraphPan(){
+  const svg=document.getElementById('inv-svg'); if(!svg) return;
+  let drag=null;
+  svg.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,px:GRAPH_PAN.x,py:GRAPH_PAN.y};});
+  window.addEventListener('mouseup',()=>drag=null);
+  window.addEventListener('mousemove',e=>{ if(!drag) return; const r=svg.getBoundingClientRect(); GRAPH_PAN.x=drag.px-(e.clientX-drag.x)*(1100/GRAPH_ZOOM)/r.width; GRAPH_PAN.y=drag.py-(e.clientY-drag.y); svg.setAttribute('viewBox',`${GRAPH_PAN.x} ${GRAPH_PAN.y} ${1100/GRAPH_ZOOM} ${svg.height.baseVal.value/GRAPH_ZOOM}`); });
+}
+async function submitChallenge(){
+  const q=document.getElementById('challenge-q').value.trim(); if(!q||!LAST_INCIDENT) return;
+  const box=document.getElementById('challenge-a'); box.innerHTML='<p>Reasoning from stored evidence…</p>';
+  const r=await fetch('/api/incidents/'+LAST_INCIDENT+'/challenge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+  const d=await r.json();
+  if(!r.ok){ box.innerHTML=`<p>${esc(d.detail||'failed')}</p>`; return; }
+  box.innerHTML=`<div class="evidence-box"><strong>Answer</strong> (confidence ${Math.round((d.confidence||0)*100)}%)<br/>${esc(d.answer)}</div>`+
+    (d.evidence_refs&&d.evidence_refs.length?`<div><strong>Evidence</strong>${d.evidence_refs.map(e=>`<div class="evidence-box">${esc(e)}</div>`).join('')}</div>`:'')+
+    (d.limitations&&d.limitations.length?`<div style="font-size:.78rem;color:var(--text-muted)"><strong>Limitations:</strong><br/>${d.limitations.map(esc).join('<br/>')}</div>`:'');
+}
+async function loadInvTimeline(incident_id){
+  try{
+    const t=await (await fetch('/api/incidents/'+incident_id+'/timeline?view=significant')).json();
+    const evs=t.events||[];
+    document.getElementById('inv-timeline').innerHTML=evs.length?('<div class="timeline">'+evs.map(e=>`<div><span class="ts">${esc(e.timestamp||'')}</span><br/><strong>${esc(e.event_type||'')}</strong> — ${esc(e.description||'')}</div>`).join('')+'</div>'):'<p style="color:var(--text-muted)">No timeline yet — run RCA first.</p>';
+  }catch(e){ document.getElementById('inv-timeline').innerHTML='<p>No timeline available.</p>'; }
+}
+async function loadInvActivity(incident_id){
+  try{
+    const rows=await (await fetch('/api/incidents/'+incident_id+'/activity')).json();
+    document.getElementById('incident-activity').innerHTML=rows.length?('<div class="timeline">'+rows.slice(0,30).map(e=>`<div><span class="ts">${esc(e.timestamp||'')}</span><br/><strong>${esc(e.event||'')}</strong> — ${esc(e.description||'')} <span style="color:var(--text-muted)">(${esc(e.actor||'')})</span></div>`).join('')+'</div>'):'<p style="color:var(--text-muted)">No activity yet.</p>';
+  }catch(e){}
 }
 /* ---- workspace extras ---- */
 const WF_STEPS=[['Incident Detected','inc-title'],['Evidence Collected','log-summary'],['Evidence Correlated','live-logs'],['Root Cause Identified','rca-output'],['Remediation Proposed','remediation-box'],['Approval Required','approval-box'],['PR Created','codefix-output'],['Resolution','related-pr']];
