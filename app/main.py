@@ -187,7 +187,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <input id="cf-msg" placeholder="approval note (optional)…" style="flex:1;min-width:180px;background:#0b1329;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:7px 10px;font-size:.8rem" />
                         <button class="btn btn-green" id="cf-approve-btn" onclick="approveFixPR()">Approve &amp; Create PR</button>
                         <button class="btn btn-red" onclick="rejectFix()">Reject</button>
-                        <button class="sim-btn" onclick="generateFix(true)">Regenerate Fix</button>
+                        <button class="sim-btn" onclick="generateFix(true)">Generate Fix</button>
                     </div>
                     <div id="cf-pr" style="margin-top:10px"></div>
                     <div id="cf-tests" style="margin-top:8px;font-size:.8rem"></div>
@@ -211,9 +211,12 @@ async function loadIncidents(){
     const card=document.createElement('div'); card.className='incident-card'+(idx===0?' active':'');
     const title=f.replace('incident_','').replace('.json','').replace(/_/g,' ').toUpperCase();
     card.innerHTML=`<h4>${title}</h4><p>${f}</p>`;
-    card.onclick=()=>{document.querySelectorAll('.incident-card').forEach(x=>x.classList.remove('active'));card.classList.add('active');currentIncident=f;liveIncidentFile=null;runRCA();};
+    card.onclick=()=>{document.querySelectorAll('.incident-card').forEach(x=>x.classList.remove('active'));card.classList.add('active');currentIncident=f;liveIncidentFile=null;liveScenario=null;runRCA();};
     c.appendChild(card);
-  }); runRCA();
+  });
+  // No auto-run: user picks an incident (click) or simulates + clicks Do RCA.
+  document.getElementById('inc-title').innerText='Google Cloud RCA Investigation';
+  document.getElementById('inc-desc').innerText='Select an incident from the sidebar, or simulate errors below and click Do RCA (Live).';
 }
 async function simulate(scenario){
   const btn=document.getElementById('live-status'); btn.innerHTML='<span class="status-dot dot-red"></span>Injecting...';
@@ -359,7 +362,13 @@ async function runLiveRCA(){
   if(data.approval){ const ap=data.approval; _lastApprSig=ap.approval_id+':'+ap.status; document.getElementById('approval-box').innerHTML=_approvalCard(ap,true); const inp=document.getElementById('msg-'+ap.approval_id); if(inp) inp.focus(); }
   btn.disabled=false; btn.innerText='🧠 Do RCA (Live)';
   fetchLogs();
-  if(useLive&&data.incident_id){ autoCodeFix(data.incident_id); }
+  if(useLive&&data.incident_id){
+    // Code fix stays fully explicit: show the panel with a hint, create nothing.
+    document.getElementById('codefix-output').style.display='block';
+    refreshPreflight();
+    document.getElementById('cf-investigation').innerHTML='<span style="color:var(--text-muted);font-size:.85rem">RCA complete. Click Generate Fix to inspect code and propose a patch — nothing is created until you approve.</span>';
+    document.getElementById('cf-diff-wrap').style.display='none';
+  }
 }
 async function refreshPreflight(){
   try{
@@ -371,16 +380,16 @@ async function refreshPreflight(){
       (d.hint?`<br/><span style="color:var(--accent-yellow)">${esc(d.hint)}</span>`:'');
   }catch(e){ /* never break the panel */ }
 }
-async function autoCodeFix(incident_id){
-  // Fire-and-forget code investigation right after RCA so the diff panel fills in
-  try{
-    document.getElementById('codefix-output').style.display='block';
-    refreshPreflight();
-    document.getElementById('cf-investigation').innerHTML='<span style="color:var(--text-muted);font-size:.85rem">Investigating code…</span>';
-    const inv=await (await fetch('/api/incidents/'+incident_id+'/analyze-code',{method:'POST'})).json();
-    renderInvestigation(inv);
-    await generateFix(false);
-  }catch(e){ document.getElementById('cf-investigation').innerHTML='<span style="color:var(--accent-red)">Code investigation failed: '+esc(e.message||e)+'</span>'; }
+async function proposeRemediation(){
+  if(!LAST_INCIDENT) return;
+  const rb=document.getElementById('remediation-box');
+  rb.innerHTML='<span style="color:var(--text-muted);font-size:.85rem">Proposing remediation…</span>';
+  const r=await fetch('/api/incidents/'+LAST_INCIDENT+'/remediation/propose',{method:'POST'});
+  const d=await r.json();
+  if(!r.ok){ rb.innerHTML='<span style="color:var(--accent-red)">'+esc(d.detail||'proposal failed')+'</span>'; return; }
+  const p=d.remediation_plan, a=d.approval;
+  rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#020617"><strong>Proposed:</strong> ${esc(p.recommended_action)} (${esc(p.mitigation_type)}) Risk ${esc(p.estimated_risk)}<br/><strong>Effect:</strong> ${esc(p.expected_effect)}<br/><strong>Rollback:</strong> ${esc(p.rollback_plan)}<br/><strong>Approval:</strong> ${esc(a.approval_id)} <em>${esc(a.status)}</em> — decide in Phase 4 Approval (sidebar).</div>`;
+  fetchLogs();
 }
 function renderRCA(data){
   const out=document.getElementById('rca-output'); out.style.display='block';
@@ -398,7 +407,9 @@ function renderRCA(data){
   document.getElementById('evidence-list').innerHTML=(data.evidence||data.supporting_evidence||[]).map(e=>`<div class="evidence-box"><span style="color:var(--accent-green)">✔</span> ${e}</div>`).join('');
   document.getElementById('contra-list').innerHTML=(data.contradictory_evidence||[]).map(c=>`<div class="evidence-box"><span style="color:var(--accent-red)">✖</span> ${c}</div>`).join('')||'<p style="color:var(--text-muted);font-size:.85rem">None</p>';
   const rb=document.getElementById('remediation-box');
-  if(data.remediation_plan||data.approval){ const p=data.remediation_plan||data; const a=data.approval; rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#020617"><strong>Remediation:</strong> ${p.recommended_action||p.action} (${p.mitigation_type||''}) Risk ${p.estimated_risk||p.risk}<br/><strong>Rollback:</strong> ${p.rollback_plan||''}<br/>${a?`<strong>Approval:</strong> ${a.approval_id} <em>${a.status}</em>`:''}</div>`; } else { rb.innerHTML='';}
+  if(data.remediation_plan||data.approval){ const p=data.remediation_plan||data; const a=data.approval; rb.innerHTML=`<div style="padding:10px;border:1px solid var(--accent-cyan);border-radius:6px;background:#020617"><strong>Remediation:</strong> ${p.recommended_action||p.action} (${p.mitigation_type||''}) Risk ${p.estimated_risk||p.risk}<br/><strong>Rollback:</strong> ${p.rollback_plan||''}<br/>${a?`<strong>Approval:</strong> ${a.approval_id} <em>${a.status}</em>`:''}</div>`; }
+  else if(data.remediation_available){ rb.innerHTML=`<button class="sim-btn" onclick="proposeRemediation()">Propose Remediation Plan</button><div style="font-size:.78rem;color:var(--text-muted);margin-top:6px">Creates one infra approval (human-gated). Nothing runs automatically.</div>`; }
+  else { rb.innerHTML='';}
   out.scrollIntoView({behavior:'smooth'});
 }
 function setCfBadge(text, ok){
@@ -761,21 +772,18 @@ async def run_live_rca():
         ev = build_evidence_from_logs(scenario, live_logs)
     else:
         raise HTTPException(status_code=400, detail="Simulate an incident first (POST /api/simulate/{scenario})")
-    # Heavy workflow in a thread — polls and clicks keep working while it runs
-    state, plan, cat = await asyncio.to_thread(_investigate_and_plan, ev)
-    approval = global_approval_manager.create_request(
-        incident_id=ev.incident_id, action=plan.recommended_action, target_resource=plan.target_resource,
-        rationale=plan.expected_effect, root_cause=plan.root_cause, confidence=plan.confidence, risk=plan.estimated_risk.value,
-        expected_impact=plan.expected_effect, rollback_plan=plan.rollback_plan
-    )
-    audit_log("RCA_LIVE", ev.incident_id, "web-user", plan.recommended_action, approval.target_resource, approval_id=approval.approval_id)
-    # Merge report + remediation for frontend render
+    # Heavy workflow in a thread — polls and clicks keep working while it runs.
+    # NOTE: RCA creates NOTHING else here. Remediation/code-fix proposals are
+    # explicit user actions (Propose Remediation / Generate Fix buttons).
+    wf = InvestigationWorkflow()
+    state = await asyncio.to_thread(wf.run, ev)
+    audit_log("RCA_LIVE", ev.incident_id, "web-user", "investigation_complete",
+              ev.service_name)
     result = state.final_report.model_dump()
-    result["remediation_plan"] = plan.model_dump()
-    result["approval"] = approval.model_dump()
     result["timeline"] = [t.model_dump() for t in state.final_report.timeline]
     # add simulated logs hint
     result["live_logs_count"] = len(SIMULATED_LOGS)
+    result["remediation_available"] = True
     # remember validated RCA for the code-fix pipeline (Part 5+)
     _best_cat, _best_conf = None, 0.0
     for _v in state.validated_hypotheses:
@@ -783,14 +791,18 @@ async def run_live_rca():
             _h = next((x for x in state.hypotheses if x.hypothesis_id == _v.hypothesis_id), None)
             if _h and _v.adjusted_confidence >= _best_conf:
                 _best_cat, _best_conf = _h.root_cause_category, _v.adjusted_confidence
+    _best_cat = _best_cat or (state.hypotheses[0].root_cause_category if state.hypotheses else "unknown")
     LAST_RCA[ev.incident_id] = {
-        "root_cause_category": _best_cat or (state.hypotheses[0].root_cause_category if state.hypotheses else "unknown"),
+        "root_cause_category": _best_cat,
         "root_cause": state.final_report.root_cause,
         "confidence": state.final_report.confidence,
         "supporting_evidence": state.final_report.supporting_evidence,
         "contradictory_evidence": state.final_report.contradictory_evidence,
         "service": ev.service_name,
     }
+    LAST_INVESTIGATION[ev.incident_id] = {"state": state, "category": _best_cat}
+    while len(LAST_INVESTIGATION) > 20:
+        LAST_INVESTIGATION.pop(next(iter(LAST_INVESTIGATION)))
     return result
 
 # --- Code fix + PR pipeline (Parts 5-15, 19) ---
@@ -798,6 +810,7 @@ from schemas.code_fix import FixJob, FixStatus
 
 FIX_JOBS = {}  # incident_id -> {"job": FixJob, "proposal": PatchProposal|None, "approval_id": str|None}
 LAST_RCA = {}  # incident_id -> validated RCA summary for code mapping
+LAST_INVESTIGATION = {}  # incident_id -> {"state": InvestigationState, "category": str} (bounded, for explicit remediation proposals)
 
 
 def _get_rca(incident_id: str) -> dict:
@@ -811,6 +824,29 @@ def _demo_repo() -> str:
     import os as _os
     return _os.getenv("DEMO_APP_PATH") or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cloud-rca-demo-app")
+
+
+@app.post("/api/incidents/{incident_id}/remediation/propose")
+async def propose_remediation(incident_id: str):
+    """Explicit remediation proposal from the stored live investigation.
+
+    Creates exactly one INFRASTRUCTURE_ACTION approval. Nothing is proposed
+    automatically — the dashboard calls this only via Propose Remediation.
+    """
+    entry = LAST_INVESTIGATION.get(incident_id)
+    if not entry:
+        raise HTTPException(status_code=400, detail=f"No live investigation for {incident_id}: click 'Do RCA (Live)' first")
+    state, cat = entry["state"], entry["category"]
+    plan = await asyncio.to_thread(
+        RemediationAgent().plan, state.incident_evidence, state.final_report, cat)
+    approval = global_approval_manager.create_request(
+        incident_id=incident_id, action=plan.recommended_action, target_resource=plan.target_resource,
+        rationale=plan.expected_effect, root_cause=plan.root_cause, confidence=plan.confidence, risk=plan.estimated_risk.value,
+        expected_impact=plan.expected_effect, rollback_plan=plan.rollback_plan
+    )
+    audit_log("REMEDIATION_PLANNED", incident_id, "web-user", plan.recommended_action,
+              approval.target_resource, approval_id=approval.approval_id)
+    return {"remediation_plan": plan.model_dump(), "approval": approval.model_dump()}
 
 
 @app.post("/api/incidents/{incident_id}/analyze-code")
