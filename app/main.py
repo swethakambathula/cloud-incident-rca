@@ -513,6 +513,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div id="challenge-a" style="margin-top:8px"></div>
             </div>
         </div>
+        <div id="sec-code" style="display:none">
+            <div class="card"><div class="card-title">🔀 What Changed Before the Incident?</div><div id="inv-changed"></div></div>
+            <div class="rca-grid">
+                <div class="card"><div class="card-title">🎯 Code Correlation</div><div id="inv-codecorr"></div></div>
+                <div class="card"><div class="card-title">⛓ Causal Chain</div><div id="inv-causal"></div></div>
+            </div>
+        </div>
+        <div id="sec-fix" style="display:none">
+            <div class="card"><div class="card-title">🔧 Fix Preview</div><div id="inv-fixpreview"></div></div>
+            <div class="rca-grid">
+                <div class="card"><div class="card-title">🧪 Test Impact</div><div id="inv-tests"></div></div>
+                <div class="card"><div class="card-title">⚖ Before / After Verification</div><div id="inv-verify"></div></div>
+            </div>
+        </div>
         <div id="sec-timeline" style="display:none"><div class="card"><div class="card-title">⏱ Incident Timeline</div><div id="inv-timeline"></div></div></div>
             <div class="grid" id="sec-gov">
                 <div class="card"><div class="card-title">Approval Timeline</div><div id="approval-timeline"><span style="color:var(--text-muted);font-size:.8rem">No approval events yet.</span></div></div>
@@ -1165,6 +1179,7 @@ async function generateFix(regen){
     setCfBadge(data.fix_status, false);
   }
   fetchLogs();
+  if(LAST_INCIDENT&&(INV_TAB==='remediation')) loadFixIntel(LAST_INCIDENT);
 }
 async function approveFixPR(){
   if(!LAST_INCIDENT) return;
@@ -1482,16 +1497,17 @@ async function createManual(){
 }
 /* ---- investigation platform: tabs, hero, graph, why, challenge ---- */
 let INV_TAB='summary', INV_GRAPH=null, GRAPH_ZOOM=1, GRAPH_PAN={x:0,y:0};
-const INV_TABS={summary:['inc-hero','rca-output'],investigation:['sec-inv'],evidence:['sec-live'],timeline:['sec-timeline'],remediation:['codefix-output'],approvals:['sec-gov'],activity:['sec-meta','sec-activity']};
+const INV_TABS={summary:['inc-hero','rca-output'],investigation:['sec-inv','sec-code'],evidence:['sec-live'],timeline:['sec-timeline'],remediation:['codefix-output','sec-fix'],approvals:['sec-gov'],activity:['sec-meta','sec-activity']};
 function switchInvTab(name){
   INV_TAB=name;
   document.querySelectorAll('#inv-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===name));
   const show=new Set(INV_TABS[name]||[]);
-  ['inc-hero','rca-output','sec-inv','sec-live','sec-timeline','codefix-output','sec-gov','sec-meta','sec-activity'].forEach(id=>{
+  ['inc-hero','rca-output','sec-inv','sec-code','sec-live','sec-timeline','codefix-output','sec-fix','sec-gov','sec-meta','sec-activity'].forEach(id=>{
     const el=document.getElementById(id); if(!el) return;
     el.style.display=show.has(id)?'':'none';
   });
-  if(name==='investigation'&&LAST_INCIDENT) loadInvestigation(LAST_INCIDENT);
+  if(name==='investigation'&&LAST_INCIDENT){ loadInvestigation(LAST_INCIDENT); loadCodeIntel(LAST_INCIDENT); }
+  if(name==='remediation'&&LAST_INCIDENT) loadFixIntel(LAST_INCIDENT);
   if(name==='timeline'&&LAST_INCIDENT) loadInvTimeline(LAST_INCIDENT);
   if(name==='activity'&&LAST_INCIDENT) loadInvActivity(LAST_INCIDENT);
 }
@@ -1616,6 +1632,49 @@ async function submitChallenge(){
   box.innerHTML=`<div class="evidence-box"><strong>Answer</strong> (confidence ${Math.round((d.confidence||0)*100)}%)<br/>${esc(d.answer)}</div>`+
     (d.evidence_refs&&d.evidence_refs.length?`<div><strong>Evidence</strong>${d.evidence_refs.map(e=>`<div class="evidence-box">${esc(e)}</div>`).join('')}</div>`:'')+
     (d.limitations&&d.limitations.length?`<div style="font-size:.78rem;color:var(--text-muted)"><strong>Limitations:</strong><br/>${d.limitations.map(esc).join('<br/>')}</div>`:'');
+}
+async function loadCodeIntel(incident_id){
+  try{
+    const w=await (await fetch('/api/incidents/'+incident_id+'/what-changed')).json();
+    document.getElementById('inv-changed').innerHTML=
+      `<div class="kv"><dt>Deployment</dt><dd>${esc(w.current_revision||'—')}</dd><dt>Previous</dt><dd>${esc(w.previous_revision||'—')}</dd><dt>Deployed</dt><dd>${esc(w.deployed_at||'—')}${w.minutes_before_incident!=null?' ('+w.minutes_before_incident+' min before incident)':''}</dd><dt>Most relevant</dt><dd><strong>${esc(w.most_relevant_change||'—')}</strong></dd></div>`+
+      (w.recent_commits&&w.recent_commits.length?`<div style="margin-top:6px;font-size:.8rem"><strong>Recent commits</strong>${w.recent_commits.map(c=>`<div class="evidence-box">${esc(c)}</div>`).join('')}</div>`:'')+
+      (w.explanation?`<div style="margin-top:6px;font-size:.85rem">${esc(w.explanation)}</div>`:'')+
+      (w.diff?`<pre style="background:#000;border:1px solid var(--border-color);border-radius:6px;padding:10px;overflow-x:auto;font-size:.75rem;white-space:pre-wrap">${esc(w.diff.slice(0,1500))}</pre>`:'');
+  }catch(e){ document.getElementById('inv-changed').innerHTML='<p style="color:var(--text-muted)">Run RCA first.</p>'; }
+  try{
+    const cc=await (await fetch('/api/incidents/'+incident_id+'/code-correlation')).json();
+    document.getElementById('inv-codecorr').innerHTML=cc.available?
+      `<div style="font-size:1.2rem;font-weight:700">${esc(cc.level)}${cc.score!=null?' <span style="font-size:.8rem;color:var(--text-muted)">'+cc.score+'%</span>':''}</div><div style="font-size:.8rem;color:var(--text-muted)">${esc(cc.primary_suspect)}</div>`+
+      (cc.checks||[]).map(c=>`<div style="font-size:.78rem;margin-top:3px">${c.passed?'✓':'✕'} ${esc(c.name)} <span style="color:var(--text-muted)">— ${esc(c.detail||'')}</span></div>`).join('')
+      :`<p style="color:var(--text-muted)">${esc(cc.reason||'Unavailable')}</p>`;
+  }catch(e){}
+  try{
+    const ch=await (await fetch('/api/incidents/'+incident_id+'/causal-chain')).json();
+    document.getElementById('inv-causal').innerHTML=(ch.chain||[]).map((l,i)=>`<div style="font-size:.82rem">${i>0?'<div style="color:var(--text-muted)">↓</div>':''}<strong>${l.step}. ${esc(l.title)}</strong><br/>${esc(l.detail)}<br/><span style="font-size:.72rem;color:var(--text-muted)">from: ${esc(l.derived_from)}</span></div>`).join('')+
+      (ch.contributing_factors&&ch.contributing_factors.length?`<div style="margin-top:8px"><strong>Contributing factors</strong>${ch.contributing_factors.map(f=>`<div class="evidence-box">• ${esc(f.factor)} <span style="color:var(--text-muted)">(${esc(f.derived_from)})</span></div>`).join('')}</div>`:'');
+  }catch(e){}
+}
+async function loadFixIntel(incident_id){
+  try{
+    const p=await (await fetch('/api/incidents/'+incident_id+'/fix-preview')).json();
+    document.getElementById('inv-fixpreview').innerHTML=
+      `<div class="hero-stats"><div class="hero-stat">Fix Confidence<strong>${Math.round((p.fix_confidence||0)*100)}%</strong></div><div class="hero-stat">Risk<strong>${esc(p.risk||'—')}</strong></div><div class="hero-stat">Files<strong>${(p.files_changed||[]).length}</strong></div><div class="hero-stat">Lines<strong>+${p.lines_added||0} / -${p.lines_removed||0}</strong></div></div>`+
+      `<div style="margin-top:6px;font-size:.85rem"><strong>${esc(p.summary||'')}</strong><br/>${esc(p.reason||'')}<br/><span style="color:var(--text-muted)">Expected: ${esc(p.expected_behavior||'')} Side effects: ${esc(p.side_effects||'')} Rollback: ${esc(p.rollback||'')}</span></div>`+
+      `<div style="margin-top:6px;font-size:.8rem"><strong>Why this patch?</strong> ${esc(p.why_minimal||'')}</div>`+
+      (p.alternatives&&p.alternatives.length?`<div style="font-size:.8rem"><strong>Alternatives considered</strong>${p.alternatives.map(a=>`<div class="evidence-box">${esc(a.option)} — rejected: ${esc(a.rejected_because)}</div>`).join('')}</div>`:'');
+    document.getElementById('inv-tests').innerHTML=
+      `<div style="font-size:.82rem"><strong>Selected tests (${(p.tests||[]).length})</strong>${(p.tests||[]).map(t=>`<div class="evidence-box">✓ ${esc(t.test)}<br/><span style="color:var(--text-muted)">${esc(t.why)}</span></div>`).join('')||'<p>—</p>'}</div>`+
+      (p.tests_passed!=null?`<div style="margin-top:6px">After fix: <strong>${p.tests_passed} passed</strong> (${esc(p.fix_status||'')})</div>`:`<div style="margin-top:6px;color:var(--text-muted)">Fix not yet applied — no test results.</div>`);
+  }catch(e){ document.getElementById('inv-fixpreview').innerHTML='<p style="color:var(--text-muted)">No fix proposed yet — click Generate Fix.</p>'; document.getElementById('inv-tests').innerHTML=''; }
+  try{
+    const v=await (await fetch('/api/incidents/'+incident_id+'/verification-comparison')).json();
+    document.getElementById('inv-verify').innerHTML=
+      `<div style="font-size:1.1rem;font-weight:700">${v.passed?'✓ Verification Passed':v.regressed?'✕ Regression Detected':esc(v.conclusion||'')}</div>`+
+      `<table class="tbl"><thead><tr><th>Metric</th><th>Before</th><th>After</th></tr></thead><tbody>${(v.metrics||[]).map(m=>`<tr><td>${esc(m.metric)}</td><td>${esc(String(m.before??'—'))}</td><td>${esc(String(m.after??'—'))}</td></tr>`).join('')}</tbody></table>`+
+      (v.resolution_checks||[]).map(c=>`<div style="font-size:.8rem;margin-top:3px">${c.passed?'✓':'✕'} ${esc(c.check)} <span style="color:var(--text-muted)">— ${esc(c.detail||'')}</span></div>`).join('')+
+      (v.summary?`<div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">${esc(v.summary)}</div>`:'');
+  }catch(e){ document.getElementById('inv-verify').innerHTML='<p style="color:var(--text-muted)">No verification recorded yet.</p>'; }
 }
 async function loadInvTimeline(incident_id){
   try{
@@ -4151,6 +4210,94 @@ def investigation_challenge(incident_id: str, body: dict):
     missing = list(getattr(ctx["state"], "missing_evidence", []) or [])
     ans = challenge_answer(question, ctx["state"], ctx["rca"], code_findings, missing)
     return {"incident_id": incident_id, "question": question, **ans.model_dump()}
+
+
+# ================= Investigation platform (Phase 2: code intelligence) =================
+
+@app.get("/api/incidents/{incident_id}/what-changed")
+def investigation_what_changed(incident_id: str):
+    import subprocess
+    from tools.investigation import what_changed
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    inv = (ctx["fix_entry"] or {}).get("investigation") or {}
+    findings = inv.get("findings", []) or []
+    suspect = f"{findings[0]['file']}:{findings[0]['start_line']}" if findings else ""
+    prop = (ctx["fix_entry"] or {}).get("proposal")
+    diff = (prop.model_dump().get("patch", "") if prop is not None and not isinstance(prop, dict)
+            else (prop or {}).get("patch", ""))
+    commits, files = [], []
+    try:
+        r = subprocess.run(["git", "log", "-5", "--format=%h %s"], cwd=_demo_repo(),
+                           capture_output=True, text=True, timeout=8)
+        commits = [l for l in (r.stdout or "").splitlines() if l.strip()]
+        f = subprocess.run(["git", "log", "-5", "--name-only", "--format="], cwd=_demo_repo(),
+                           capture_output=True, text=True, timeout=8)
+        files = sorted({l.strip() for l in (f.stdout or "").splitlines() if l.strip()})
+    except Exception:
+        pass
+    return {"incident_id": incident_id,
+            **what_changed(ctx["state"], _demo_repo(), commits, suspect, diff),
+            "recent_files_changed": files[:20]}
+
+
+@app.get("/api/incidents/{incident_id}/code-correlation")
+def investigation_code_correlation(incident_id: str):
+    from tools.investigation import code_correlation_score
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    findings = ((ctx["fix_entry"] or {}).get("investigation") or {}).get("findings", []) or []
+    wc = investigation_what_changed(incident_id)
+    ev = getattr(ctx["state"], "incident_evidence", None)
+    rev = bool(getattr(ev, "revision_name", "") or (getattr(ev, "recent_deployments", []) or []))
+    return {"incident_id": incident_id,
+            **code_correlation_score(findings, ctx["rca"].get("root_cause", ""),
+                                     wc.get("recent_files_changed", []), rev).model_dump()}
+
+
+@app.get("/api/incidents/{incident_id}/causal-chain")
+def investigation_causal_chain(incident_id: str):
+    from tools.investigation import causal_chain
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    findings = ((ctx["fix_entry"] or {}).get("investigation") or {}).get("findings", []) or []
+    suspect = f"{findings[0]['file']}:{findings[0]['start_line']}" if findings else ""
+    return {"incident_id": incident_id,
+            **causal_chain(ctx["state"], suspect, ctx["rca"].get("root_cause", ""))}
+
+
+@app.get("/api/incidents/{incident_id}/fix-preview")
+def investigation_fix_preview(incident_id: str):
+    from tools.investigation import fix_preview
+    ctx = _inv_ctx(incident_id)
+    entry = ctx["fix_entry"] or {}
+    prop = entry.get("proposal")
+    if prop is None:
+        raise HTTPException(status_code=404, detail="No code fix proposed yet for this incident")
+    pd = prop if isinstance(prop, dict) else prop.model_dump()
+    job = entry.get("job")
+    jd = job if isinstance(job, dict) else (job.model_dump() if job is not None else {})
+    return {"incident_id": incident_id, "repository": "cloud-rca-demo-app",
+            **fix_preview(pd, jd, float(ctx["rca"].get("confidence", 0) or 0),
+                          ctx["rca"].get("root_cause_category", ""))}
+
+
+@app.get("/api/incidents/{incident_id}/verification-comparison")
+def investigation_verification(incident_id: str):
+    from tools.investigation import verification_comparison
+    from memory.store import MemoryStore
+    try:
+        mem = MemoryStore(use_bigquery=False).get(incident_id) or {}
+    except Exception:
+        mem = {}
+    out = verification_comparison(mem.get("verification_result") or {},
+                                  mem.get("execution_result") or {})
+    if out is None:
+        raise HTTPException(status_code=404, detail="No verification recorded for this incident yet")
+    return {"incident_id": incident_id, **out}
 
 
 # Keep original analyze endpoint

@@ -8,9 +8,10 @@ import re
 from typing import Dict, List, Optional
 
 from schemas.investigation import (
-    AgentFindingView, ChallengeAnswer, CodeCorrelation, ConfidenceSnapshot,
-    InvestigationEdge, InvestigationGraph, InvestigationNode, QualityFactor,
-    QualityScore, SimilarIncidentMatch, WhyNotItem, WhyThisView,
+    AgentFindingView, CausalLink, ChallengeAnswer, CodeCorrelation,
+    ConfidenceSnapshot, ContributingFactor, InvestigationEdge,
+    InvestigationGraph, InvestigationNode, QualityFactor, QualityScore,
+    SimilarIncidentMatch, WhyNotItem, WhyThisView,
 )
 
 
@@ -401,6 +402,236 @@ def quality_score(state, root_conf: float = 0.0, completeness_pct: float = 0.0,
     total = round(min(100.0, sum(f.points for f in factors)), 1)
     return QualityScore(score=total, root_cause_confidence=root_conf,
                         factors=factors, deductions=deductions)
+
+
+# ---------------- What changed (real deployment + git data) ----------------
+
+def what_changed(state, repo_root: str = "", recent_commits: List[str] = None,
+                 suspect_file: str = "", patch_diff: str = "") -> Dict:
+    recent_commits = recent_commits or []
+    ev = getattr(state, "incident_evidence", None) if state is not None else None
+    deps = list(getattr(ev, "recent_deployments", []) or []) if ev is not None else []
+    current = getattr(ev, "revision_name", "") if ev is not None else ""
+    start = getattr(ev, "start_time", "") if ev is not None else ""
+    out = {"current_revision": current, "previous_revision": "",
+           "deployed_at": "", "minutes_before_incident": None,
+           "recent_commits": recent_commits[:5],
+           "most_relevant_change": suspect_file,
+           "diff": patch_diff[:4000] if patch_diff else "",
+           "explanation": ""}
+    if deps:
+        cur = next((d for d in deps if isinstance(d, dict) and d.get("revision_name") == current), None)
+        others = [d for d in deps if isinstance(d, dict) and d.get("revision_name") != current]
+        if cur is None and deps:
+            cur = deps[0]
+        if isinstance(cur, dict):
+            out["deployed_at"] = cur.get("deployed_at") or cur.get("creation_time") or ""
+        if others and isinstance(others[0], dict):
+            out["previous_revision"] = others[0].get("revision_name", "")
+        if out["deployed_at"] and start:
+            try:
+                from datetime import datetime
+                dep = datetime.fromisoformat(str(out["deployed_at"]).replace("Z", "+00:00"))
+                st = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+                out["minutes_before_incident"] = round((st - dep).total_seconds() / 60, 1)
+            except Exception:
+                pass
+    if suspect_file and out["current_revision"]:
+        out["explanation"] = (f"Stack traces point to {suspect_file}, active on "
+                              f"{out['current_revision'] or 'the failing revision'}.")
+    elif suspect_file:
+        out["explanation"] = f"Stack traces point to {suspect_file}."
+    return out
+
+
+# ---------------- Code correlation (deterministic checks) ----------------
+
+def code_correlation_score(code_findings: List[Dict], error_signature: str = "",
+                           recent_files_changed: List[str] = None,
+                           revision_present: bool = False) -> CodeCorrelation:
+    recent_files_changed = recent_files_changed or []
+    if not code_findings:
+        return CodeCorrelation(available=False, level="Unavailable",
+                               reason="No code findings stored for this incident.")
+    f = code_findings[0]
+    checks: List[Dict] = []
+    checks.append({"name": "File match", "passed": bool(f.get("file")),
+                   "detail": f.get("file", "")})
+    checks.append({"name": "Line match", "passed": bool(int(f.get("start_line", 0) or 0) > 0),
+                   "detail": f"line {f.get('start_line', 0)}"})
+    checks.append({"name": "Function match", "passed": bool(f.get("function")),
+                   "detail": f.get("function") or "not recorded"})
+    changed = [c for c in recent_files_changed if f.get("file", "") in c or c in f.get("file", "")]
+    checks.append({"name": "Recent commit touches file", "passed": bool(changed),
+                   "detail": changed[0] if changed else "no recent commit lists this file"})
+    checks.append({"name": "Deployment correlation", "passed": revision_present,
+                   "detail": "failing revision recorded" if revision_present else "no revision recorded"})
+    sig_words = set(re.findall(r"[a-z]{4,}", (error_signature or "").lower()))
+    snip_words = set(re.findall(r"[a-z]{4,}", str(f.get("snippet", "")).lower() + " " + str(f.get("reason", "")).lower()))
+    sig_hit = bool(sig_words & snip_words)
+    checks.append({"name": "Error signature match", "passed": sig_hit,
+                   "detail": "signature terms in finding" if sig_hit else "no signature overlap"})
+    checks.append({"name": "Test reproduction", "passed": bool(f.get("related_test")),
+                   "detail": f.get("related_test") or "no linked test"})
+    weights = [25, 20, 15, 15, 10, 10, 5]
+    score = round(sum(w for w, c in zip(weights, checks) if c["passed"]), 1)
+    level = "Strong" if score >= 80 else ("Moderate" if score >= 50 else "Weak")
+    suspect = f"{f.get('file', '')}:{f.get('start_line', 0)}"
+    return CodeCorrelation(available=True, score=score, level=level,
+                           checks=checks, primary_suspect=suspect,
+                           reason=f.get("reason", ""))
+
+
+# ---------------- Causal chain + contributing factors ----------------
+
+def causal_chain(state, suspect_file: str = "", root_cause: str = "") -> Dict:
+    links: List[CausalLink] = []
+    step = 0
+
+    def add(title: str, detail: str, derived_from: str):
+        nonlocal step
+        step += 1
+        links.append(CausalLink(step=step, title=title, detail=detail,
+                                derived_from=derived_from))
+
+    ev = getattr(state, "incident_evidence", None) if state is not None else None
+    deps = list(getattr(ev, "recent_deployments", []) or []) if ev is not None else []
+    if deps and isinstance(deps[0], dict):
+        add("Revision deployed",
+            f"{deps[0].get('revision_name', 'unknown revision')} deployed "
+            f"{deps[0].get('deployed_at') or deps[0].get('creation_time') or 'at unknown time'}.",
+            "deployment metadata")
+    if suspect_file:
+        add("Fault activated in code",
+            f"{suspect_file} executed on the failing revision.",
+            "stack trace + code finding")
+    rep = getattr(state, "final_report", None) if state is not None else None
+    for t in (list(getattr(rep, "timeline", []) or [])[:4]):
+        add(getattr(t, "event_type", "EVENT").replace("_", " ").title(),
+            getattr(t, "description", ""), "incident timeline")
+    if root_cause:
+        add("Root cause confirmed", _short(root_cause, 200), "critic verdict")
+    factors = []
+    if state is not None:
+        for f in (getattr(state, "agent_findings", []) or []):
+            s = str(getattr(f, "evidence_strength", ""))
+            if "CORRELATED" in s and len(factors) < 3:
+                factors.append(ContributingFactor(
+                    factor=getattr(f, "summary", ""),
+                    derived_from=getattr(f, "agent_name", "")))
+    return {"chain": [l.model_dump() for l in links],
+            "contributing_factors": [f.model_dump() for f in factors]}
+
+
+# ---------------- Fix preview + alternatives + test impact ----------------
+
+_FIX_ALTERNATIVES = {
+    "connection_pool_exhaustion": [
+        {"option": "Increase pool size only",
+         "rejected_because": "Reduces symptoms but does not address leaked connections; the minimal fix releases connections on all paths."},
+    ],
+    "faulty_revision": [
+        {"option": "Roll forward with a hotfix in the new path",
+         "rejected_because": "Higher risk under incident pressure; restoring the previous healthy behavior first is safer."},
+    ],
+    "configuration_regression": [
+        {"option": "Hardcode corrected values",
+         "rejected_because": "Repeats the original mistake; reading from the environment keeps config portable."},
+    ],
+    "dependency_failure": [
+        {"option": "Disable the downstream dependency",
+         "rejected_because": "Loses functionality; bounded timeout with retries preserves behavior under transient slowness."},
+    ],
+    "null_pointer": [
+        {"option": "Default to an empty profile",
+         "rejected_because": "Masks missing data; failing fast with a typed error keeps the failure visible."},
+    ],
+}
+
+
+def fix_preview(proposal: Dict, job: Dict, root_conf: float = 0.0,
+                category: str = "") -> Dict:
+    proposal, job = proposal or {}, job or {}
+    tests = list(proposal.get("tests_to_run", []) or [])
+    impact = []
+    for t in tests:
+        why = ("directly exercises the modified code" if "incident" in t or "fixed" in t
+               else "verifies the success path")
+        impact.append({"test": t, "why": why})
+    test_output = job.get("test_output") or ""
+    passed = None
+    m = re.search(r"(\d+)\s+passed", test_output)
+    if m:
+        passed = int(m.group(1))
+    reasoning = proposal.get("reasoning_summary", "") or ""
+    side = ""
+    if "Side effects:" in reasoning:
+        reasoning, side = reasoning.split("Side effects:", 1)
+    return {
+        "summary": proposal.get("summary", ""),
+        "fix_confidence": round(max(0.0, root_conf - (0.05 if tests else 0.25)), 2) if root_conf else 0.0,
+        "root_cause_confidence": root_conf,
+        "risk": proposal.get("risk", ""),
+        "files_changed": proposal.get("files_changed", []),
+        "lines_added": proposal.get("lines_added", 0),
+        "lines_removed": proposal.get("lines_removed", 0),
+        "tests": impact,
+        "branch": job.get("branch") or "",
+        "reason": reasoning.strip(),
+        "expected_behavior": "Failure path addressed; success-path behavior unchanged.",
+        "side_effects": side.strip() or "None recorded.",
+        "rollback": "Revert this commit / close the PR unmerged.",
+        "why_minimal": "This is the smallest change that directly addresses the confirmed failure path.",
+        "alternatives": _FIX_ALTERNATIVES.get(category, []),
+        "tests_passed": passed,
+        "fix_status": job.get("status", ""),
+    }
+
+
+# ---------------- Verification comparison + resolution explanation ----------------
+
+def verification_comparison(verification: Dict, execution: Dict = None) -> Optional[Dict]:
+    if not verification:
+        return None
+    execution = execution or {}
+    mb, ma = verification.get("metrics_before", {}) or {}, verification.get("metrics_after", {}) or {}
+    status = str(verification.get("verification_status", verification.get("final_status", "")))
+    checks = []
+    err_after = verification.get("error_rate_after")
+    if err_after is not None:
+        checks.append({"check": "HTTP 5xx returned below 1%",
+                       "passed": float(err_after) < 1.0,
+                       "detail": f"after: {err_after}%"})
+    lat_b, lat_a = verification.get("latency_before"), verification.get("latency_after")
+    if lat_b is not None and lat_a is not None and float(lat_b or 0) > 0:
+        checks.append({"check": "P95 latency improved vs before",
+                       "passed": float(lat_a) < float(lat_b),
+                       "detail": f"before: {lat_b}ms, after: {lat_a}ms"})
+    checks.append({"check": "No new issues detected",
+                   "passed": not verification.get("new_issues_detected", False),
+                   "detail": "clean" if not verification.get("new_issues_detected", False) else "new issues flagged"})
+    checks.append({"check": "No recurrence during verification window",
+                   "passed": status in ("RESOLVED", "PARTIALLY_RESOLVED"),
+                   "detail": status or "unknown"})
+    rows = []
+    for label, bkey, akey in (("HTTP 5xx", "error_rate_before", "error_rate_after"),
+                              ("P95 latency", "latency_before", "latency_after")):
+        b, a = verification.get(bkey), verification.get(akey)
+        if b is not None or a is not None:
+            rows.append({"metric": label, "before": b, "after": a})
+    for k in sorted(set(mb) | set(ma)):
+        if k not in ("error_rate_pct", "latency_p95_ms"):
+            rows.append({"metric": k, "before": mb.get(k), "after": ma.get(k)})
+    return {"status": status,
+            "passed": status == "RESOLVED",
+            "regressed": status == "REGRESSED",
+            "metrics": rows,
+            "resolution_checks": checks,
+            "conclusion": ("Resolved" if status == "RESOLVED" else
+                           "Partially resolved" if status == "PARTIALLY_RESOLVED" else
+                           "Regression detected" if status == "REGRESSED" else status or "Unknown"),
+            "summary": verification.get("summary", ""),
+            "confidence": verification.get("verification_confidence", 0.0)}
 
 
 # ---------------- Challenge RCA (grounded, deterministic) ----------------

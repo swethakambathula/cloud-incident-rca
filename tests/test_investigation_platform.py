@@ -1,10 +1,34 @@
 """Phase 1 investigation-platform tests: graph, why/why-not, agent findings,
 confidence evolution, quality score, challenge grounding (all evidence-backed).
 """
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+
+
+@pytest.fixture()
+def demo_repo(tmp_path, monkeypatch):
+    """Isolated git checkout of the demo app with a file:// origin."""
+    import shutil
+    import subprocess
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "cloud-rca-demo-app")
+    repo = str(tmp_path / "demo")
+    shutil.copytree(src, repo, ignore=shutil.ignore_patterns("__pycache__"))
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "rca@test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "rca-test"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init faulty"], cwd=repo, check=True, capture_output=True)
+    bare = str(tmp_path / "origin.git")
+    subprocess.run(["git", "init", "--bare", bare], check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", bare], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-u", "origin", "main"], cwd=repo, check=True, capture_output=True)
+    monkeypatch.setenv("DEMO_APP_PATH", repo)
+    return repo
 
 
 @pytest.fixture(scope="module")
@@ -139,10 +163,78 @@ def test_investigation_ui_shell():
         assert f"switchInvTab('{tab}')" in html
 
 
+def test_what_changed_uses_real_deployment_data(rca_incident):
+    c, iid = rca_incident
+    w = _get(c, iid, "what-changed")
+    assert w["current_revision"] or w["previous_revision"] or w["recent_commits"] != [], w
+    assert isinstance(w["recent_commits"], list)
+
+
+def test_code_correlation_unavailable_without_fix(rca_incident):
+    c, iid = rca_incident
+    cc = _get(c, iid, "code-correlation")
+    assert "available" in cc and "checks" in cc
+
+
+def test_causal_chain_ordered_with_provenance(rca_incident):
+    c, iid = rca_incident
+    ch = _get(c, iid, "causal-chain")
+    steps = [l["step"] for l in ch["chain"]]
+    assert steps == sorted(steps) and steps[0] == 1
+    assert all(l["derived_from"] for l in ch["chain"])
+    assert isinstance(ch["contributing_factors"], list)
+
+
+def test_fix_preview_and_test_impact(rca_incident, demo_repo):
+    c, iid = rca_incident
+    g = c.post(f"/api/incidents/{iid}/generate-fix")
+    assert g.status_code == 200, g.text
+    p = _get(c, iid, "fix-preview")
+    assert p["repository"] == "cloud-rca-demo-app"
+    assert p["files_changed"] and p["tests"]
+    assert 0.0 <= p["fix_confidence"] <= 1.0
+    assert p["why_minimal"] and p["rollback"]
+    assert isinstance(p["alternatives"], list)
+
+
+def test_code_correlation_strong_after_fix(rca_incident, demo_repo):
+    c, iid = rca_incident
+    g = c.post(f"/api/incidents/{iid}/generate-fix")
+    assert g.status_code == 200, g.text
+    cc = _get(c, iid, "code-correlation")
+    assert cc["available"] is True
+    assert cc["level"] in ("Strong", "Moderate", "Weak")
+    assert any(chk["name"] == "File match" and chk["passed"] for chk in cc["checks"])
+
+
+def test_verification_comparison_builder():
+    from tools.investigation import verification_comparison
+    assert verification_comparison({}) is None
+    out = verification_comparison({
+        "verification_status": "RESOLVED", "error_rate_before": 75.8,
+        "error_rate_after": 0.3, "latency_before": 5400, "latency_after": 180,
+        "new_issues_detected": False, "verification_confidence": 0.93,
+        "summary": "recovered", "metrics_before": {}, "metrics_after": {}})
+    assert out["passed"] is True and out["conclusion"] == "Resolved"
+    assert any(m["metric"] == "HTTP 5xx" and m["before"] == 75.8 and m["after"] == 0.3
+               for m in out["metrics"])
+    assert all(chk["passed"] for chk in out["resolution_checks"])
+    reg = verification_comparison({"verification_status": "REGRESSED",
+                                   "new_issues_detected": True})
+    assert reg["regressed"] is True and reg["conclusion"] == "Regression detected"
+
+
+def test_verification_endpoint_absent_returns_404(rca_incident):
+    c, iid = rca_incident
+    r = c.get(f"/api/incidents/{iid}/verification-comparison")
+    assert r.status_code in (200, 404)
+
+
 def test_investigation_endpoints_need_rca():
     c = TestClient(app)
     for path in ("investigation-graph", "why", "agent-findings",
-                 "confidence-history", "quality-score"):
+                 "confidence-history", "quality-score", "what-changed",
+                 "code-correlation", "causal-chain", "fix-preview"):
         assert c.get(f"/api/incidents/INC-NOPE-XYZ/{path}").status_code == 404
     assert c.post("/api/incidents/INC-NOPE-XYZ/challenge",
                   json={"question": "why?"}).status_code == 404

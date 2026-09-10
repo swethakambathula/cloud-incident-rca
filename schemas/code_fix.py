@@ -14,6 +14,7 @@ class CodeFinding(BaseModel):
     reason: str
     current_value: Optional[str] = None
     related_test: Optional[str] = None
+    function: Optional[str] = None
 
 
 class CodeInvestigation(BaseModel):

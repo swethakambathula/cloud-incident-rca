@@ -137,7 +137,8 @@ class CodeInvestigationAgent:
                     snippet=hit.get("snippet", "")[:400],
                     reason=(f"Stack trace points to {hit['file']}:{hit.get('line')} "
                             f"({hit.get('function') or 'unknown frame'})."),
-                    related_test=None) for hit in res["hits"][:1]]
+                    related_test=None,
+                    function=hit.get("function") or None) for hit in res["hits"][:1]]
                 return CodeInvestigation(incident_id=incident_id,
                                          root_cause_category=root_cause_category,
                                          findings=findings)
