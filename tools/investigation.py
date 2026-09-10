@@ -634,6 +634,133 @@ def verification_comparison(verification: Dict, execution: Dict = None) -> Optio
             "confidence": verification.get("verification_confidence", 0.0)}
 
 
+# ---------------- Similar incidents (memory-backed) ----------------
+
+def similar_incidents(service: str, symptoms: List[str], category: str,
+                      store=None, limit: int = 5,
+                      exclude_id: str = "") -> List[SimilarIncidentMatch]:
+    from memory.retrieval import find_similar_incidents
+    try:
+        recs = find_similar_incidents(service=service, symptoms=symptoms,
+                                      root_cause_category=category,
+                                      limit=limit + 1, store=store)
+    except Exception:
+        return []
+    out: List[SimilarIncidentMatch] = []
+    for r in recs:
+        if r.get("incident_id") == exclude_id:
+            continue
+        matched = []
+        if r.get("service") == service:
+            matched.append("service")
+        if r.get("root_cause_category") == category:
+            matched.append("root cause")
+        rec_sym = " ".join(r.get("symptoms", [])).lower()
+        if any((s or "").lower() in rec_sym for s in symptoms if s):
+            matched.append("symptoms")
+        if not matched:
+            matched.append("metrics pattern")
+        rem = r.get("remediation") or {}
+        out.append(SimilarIncidentMatch(
+            incident_id=r.get("incident_id", ""),
+            similarity=round(0.5 + 0.1 * len(matched), 2),
+            root_cause=r.get("root_cause", ""),
+            root_cause_category=r.get("root_cause_category", ""),
+            service=r.get("service", ""),
+            final_status=r.get("final_status", ""),
+            remediation=rem if isinstance(rem, dict) else {},
+            matched_on=matched))
+        if len(out) >= limit:
+            break
+    return out
+
+
+# ---------------- Post-fix learning ----------------
+
+def learning_view(memory_rec: Dict = None) -> Dict:
+    if not memory_rec:
+        return {"in_memory": False,
+                "message": "Not yet written to RCA memory.",
+                "lessons": []}
+    lessons = []
+    if memory_rec.get("root_cause"):
+        lessons.append(f"Root cause pattern: {memory_rec['root_cause']}")
+    vr = memory_rec.get("verification_result") or {}
+    if vr.get("verification_status"):
+        lessons.append(f"Verified outcome: {vr['verification_status']}")
+    rem = memory_rec.get("remediation") or {}
+    if isinstance(rem, dict) and rem.get("recommended_action"):
+        lessons.append(f"Effective remediation: {rem['recommended_action']}")
+    return {"in_memory": True,
+            "message": "Added to RCA Memory — this incident can now help diagnose similar future incidents.",
+            "incident_id": memory_rec.get("incident_id", ""),
+            "root_cause": memory_rec.get("root_cause", ""),
+            "root_cause_category": memory_rec.get("root_cause_category", ""),
+            "final_status": memory_rec.get("final_status", ""),
+            "lessons": lessons}
+
+
+# ---------------- Investigation replay (stored events only) ----------------
+
+def replay_events(state, rec: Dict = None) -> List[Dict]:
+    events: List[Dict] = []
+    if state is None:
+        return events
+    for tr in (getattr(getattr(state, "trace", None), "agent_traces", []) or []):
+        events.append({"at": getattr(tr, "completed_at", ""),
+                       "kind": "agent",
+                       "title": getattr(tr, "agent_name", ""),
+                       "detail": f"{getattr(tr, 'evidence_items_count', 0)} item(s) in "
+                                 f"{getattr(tr, 'duration_ms', 0)}ms."})
+    for h in (getattr(state, "hypotheses", []) or []):
+        events.append({"at": "", "kind": "hypothesis",
+                       "title": f"{h.hypothesis_id}: {_humanize(h.root_cause_category)}",
+                       "detail": f"initial confidence {round(float(h.confidence_score) * 100)}%."})
+    for v in (list(getattr(state, "validated_hypotheses", []))
+              + list(getattr(state, "rejected_hypotheses", []))):
+        events.append({"at": "", "kind": "critic",
+                       "title": f"Critic verdict on {v.hypothesis_id}",
+                       "detail": f"{'accepted' if v.accepted else 'rejected'} at "
+                                 f"{round(float(v.adjusted_confidence) * 100)}%: {v.critic_reasoning}"})
+    rep = getattr(state, "final_report", None)
+    if rep is not None:
+        events.append({"at": "", "kind": "conclusion",
+                       "title": "Root cause confirmed",
+                       "detail": getattr(rep, "root_cause", "")})
+    for h in ((rec or {}).get("history", []) or []):
+        events.append({"at": h.get("at", ""), "kind": "status",
+                       "title": f"Status {h.get('from', '')} -> {h.get('to', '')}",
+                       "detail": ""})
+    for r in ((rec or {}).get("rca_runs", []) or []):
+        events.append({"at": r.get("at", ""), "kind": "run",
+                       "title": f"RCA run #{r.get('run_number', '')}: {r.get('category', '')}",
+                       "detail": f"confidence {round(float(r.get('confidence', 0)) * 100)}%."})
+    return events
+
+
+# ---------------- RCA run comparison ----------------
+
+def compare_runs(runs: List[Dict]) -> Dict:
+    ordered = sorted(runs or [], key=lambda r: r.get("run_number", 0))
+    out = [{"run": r.get("run_number"), "category": r.get("category", ""),
+            "confidence": r.get("confidence", 0),
+            "duration_s": r.get("duration_s"), "at": r.get("at", ""),
+            "evidence_source": r.get("evidence_source", "")} for r in ordered]
+    deltas: List[Dict] = []
+    for prev, cur in zip(out, out[1:]):
+        dc = None
+        try:
+            dc = round((float(cur["confidence"] or 0) - float(prev["confidence"] or 0)) * 100)
+        except Exception:
+            pass
+        deltas.append({"from_run": prev["run"], "to_run": cur["run"],
+                       "confidence_delta_pct": dc,
+                       "hypothesis_changed": prev["category"] != cur["category"],
+                       "from_category": prev["category"], "to_category": cur["category"]})
+    return {"runs": out, "deltas": deltas,
+            "note": "" if len(out) > 1 else "Only one RCA run recorded for this incident."}
+
+
 # ---------------- Challenge RCA (grounded, deterministic) ----------------
 
 _CATEGORY_ALIASES = {

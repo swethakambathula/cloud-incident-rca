@@ -58,9 +58,22 @@ class InvestigationWorkflow:
         )
         state.record_agent_trace(trace)
 
-    def run(self, evidence: IncidentEvidence, verbose: bool = False) -> InvestigationState:
+    def run(self, evidence: IncidentEvidence, verbose: bool = False,
+            progress_cb=None) -> InvestigationState:
+        from datetime import datetime, timezone as _tz
+
+        def _stage(stage: str, detail: str = ""):
+            if progress_cb is not None:
+                try:
+                    progress_cb({"stage": stage, "status": "completed",
+                                 "at": datetime.now(_tz.utc).isoformat(),
+                                 "detail": detail})
+                except Exception:
+                    pass
+
         # 1. Supervisor creates plan and state
         state = self.supervisor.initialize_state(evidence)
+        _stage("supervisor_plan", f"{len(state.investigation_plan)} planned tasks.")
         if verbose:
             print(f"[Supervisor] Plan: {state.investigation_plan}")
 
@@ -77,6 +90,7 @@ class InvestigationWorkflow:
                 state.add_agent_finding(f)
             self._record_agent(state, "Log Investigation Agent", t0, ["logging_tools: get_application_logs", "logging_tools: get_request_logs"], len(findings))
             state.record_task_completion("Analyze application errors")
+            _stage("log_agent", f"{len(findings)} relevant events identified.")
             if verbose:
                 for f in findings:
                     print(f"[Log Agent] {f.summary}")
@@ -89,6 +103,7 @@ class InvestigationWorkflow:
                 state.add_agent_finding(f)
             self._record_agent(state, "Metrics Investigation Agent", t0, ["monitoring_tools: compare_baseline_to_incident"], len(findings))
             state.record_task_completion("Compare baseline vs incident metrics")
+            _stage("metrics_agent", f"{len(findings)} metric finding(s).")
             if verbose:
                 for f in findings:
                     print(f"[Metrics Agent] {f.summary}")
@@ -101,6 +116,7 @@ class InvestigationWorkflow:
                 state.add_agent_finding(f)
             self._record_agent(state, "Deployment Investigation Agent", t0, ["deployment_tools: get_recent_revisions"], len(findings))
             state.record_task_completion("Check recent deployments")
+            _stage("deployment_agent", f"{len(findings)} deployment finding(s).")
             if verbose:
                 for f in findings:
                     print(f"[Deployment Agent] {f.summary}")
@@ -113,6 +129,7 @@ class InvestigationWorkflow:
                 state.add_agent_finding(f)
             self._record_agent(state, "Trace / Dependency Agent", t0, ["trace_tools: get_trace_id_from_log"], len(findings))
             state.record_task_completion("Inspect trace and dependency evidence")
+            _stage("trace_agent", f"{len(findings)} trace finding(s).")
             if verbose:
                 for f in findings:
                     print(f"[Trace Agent] {f.summary}")
@@ -124,6 +141,7 @@ class InvestigationWorkflow:
             state.add_knowledge_findings(k_findings)
             self._record_agent(state, "Knowledge / RAG Agent", t0, ["knowledge_tools: search_knowledge"], len(k_findings))
             state.record_task_completion("Search historical incidents and runbooks")
+            _stage("knowledge_agent", f"{len(k_findings)} knowledge finding(s).")
             if verbose:
                 for kf in k_findings:
                     print(f"[Knowledge Agent] {kf.source_id} ({kf.similarity_score}) - {kf.title}")
@@ -147,6 +165,7 @@ class InvestigationWorkflow:
         state.set_hypotheses(hypotheses)
         self._record_agent(state, "RCA Hypothesis Agent", t0, ["read_evidence_only"], len(hypotheses))
         state.record_task_completion("Generate root-cause hypotheses")
+        _stage("hypotheses", f"{len(hypotheses)} hypotheses generated.")
         if verbose:
             for h in hypotheses:
                 print(f"[RCA] {h.hypothesis_id} {h.root_cause_category} conf {h.confidence_score:.2f}: {h.root_cause[:80]}")
@@ -158,6 +177,7 @@ class InvestigationWorkflow:
             state.add_validation_result(v)
         self._record_agent(state, "Critic / Validator Agent", t0, ["read_evidence_and_hypotheses"], len(validations))
         state.record_task_completion("Validate hypotheses")
+        _stage("critic", f"{len(validations)} verdict(s) recorded.")
         if verbose:
             for v in validations:
                 print(f"[Critic] {v.hypothesis_id} {v.validation_status} adj {v.adjusted_confidence:.2f}: {v.critic_reasoning[:120]}")
@@ -214,6 +234,7 @@ class InvestigationWorkflow:
         state.set_blast_radius(blast)
         self._record_agent(state, "Blast Radius Agent", t0, ["blast_radius: detect_blast_radius"], 1)
         state.record_task_completion("Assess blast radius")
+        _stage("blast_radius", getattr(blast, "classification", ""))
         if verbose:
             print(f"[Blast Radius] {blast.classification} - {blast.estimated_scope}")
 
@@ -223,6 +244,7 @@ class InvestigationWorkflow:
         state.set_final_report(report)
         self._record_agent(state, "Final Incident Report Agent", t0, ["report_generation"], 1)
         state.record_task_completion("Generate final report")
+        _stage("report", f"confidence {round(float(report.confidence), 2)}.")
         if verbose:
             print(f"[Report] Generated report for {report.incident_id} conf {report.confidence:.2f}")
             print(self.report_agent.render_text(report))

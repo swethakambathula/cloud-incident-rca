@@ -150,6 +150,64 @@ def test_challenge_requires_question(rca_incident):
     assert c.post(f"/api/incidents/{iid}/challenge", json={"question": "  "}).status_code == 400
 
 
+def test_similar_incidents_structure(rca_incident):
+    c, iid = rca_incident
+    s = _get(c, iid, "similar-incidents")
+    assert isinstance(s["matches"], list)
+    for m in s["matches"]:
+        assert m["incident_id"] and m["incident_id"] != iid
+        assert 0.0 < m["similarity"] <= 1.0
+        assert m["matched_on"]
+    assert "historical_evidence" in s
+
+
+def test_learning_view_builder():
+    from tools.investigation import learning_view
+    assert learning_view(None)["in_memory"] is False
+    out = learning_view({"incident_id": "INC-1", "root_cause": "pool leak",
+                         "root_cause_category": "connection_pool_exhaustion",
+                         "final_status": "RESOLVED",
+                         "remediation": {"recommended_action": "fix leak"},
+                         "verification_result": {"verification_status": "RESOLVED"}})
+    assert out["in_memory"] is True and len(out["lessons"]) >= 2
+
+
+def test_replay_uses_stored_events_only(rca_incident):
+    c, iid = rca_incident
+    rp = _get(c, iid, "replay")
+    assert rp["replayed"] is True and len(rp["events"]) > 0
+    kinds = {e["kind"] for e in rp["events"]}
+    assert "agent" in kinds and "conclusion" in kinds
+
+
+def test_rca_comparison_single_run_note(rca_incident):
+    c, iid = rca_incident
+    cr = _get(c, iid, "rca-comparison")
+    assert len(cr["runs"]) >= 1
+    if len(cr["runs"]) == 1:
+        assert "Only one" in cr["note"]
+
+
+def test_compare_runs_deltas_builder():
+    from tools.investigation import compare_runs
+    out = compare_runs([
+        {"run_number": 1, "category": "traffic_overload", "confidence": 0.62},
+        {"run_number": 2, "category": "connection_pool_exhaustion", "confidence": 0.96}])
+    assert len(out["deltas"]) == 1
+    d = out["deltas"][0]
+    assert d["confidence_delta_pct"] == 34
+    assert d["hypothesis_changed"] is True
+
+
+def test_rca_progress_recorded(rca_incident):
+    c, iid = rca_incident
+    p = _get(c, iid, "rca-progress")
+    stages = {e["stage"] for e in p["events"]}
+    assert {"hypotheses", "critic", "report"} <= stages
+    assert all(e["at"] and e["status"] == "completed" for e in p["events"])
+    assert c.get("/api/incidents/INC-NOPE-XYZ/rca-progress").status_code == 404
+
+
 def test_investigation_ui_shell():
     c = TestClient(app)
     html = c.get("/").text

@@ -7,7 +7,7 @@ import glob
 import json
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from typing import List
+from typing import Dict, List
 import uvicorn
 
 from agents.rca_agent.agent import CloudRCAAgent
@@ -434,6 +434,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <button class="btn btn-green btn-primary" id="rca-btn" onclick="runLiveRCA()">Run Live RCA</button>
                     <span id="rca-gate" style="font-size:.78rem;color:var(--text-muted)">Run the RCA agent against the currently collected incident evidence. The agent will correlate logs, metrics, deployments, traces, infrastructure state, and code changes before proposing a root cause.</span>
                 </div>
+                <div id="agent-progress" style="margin-top:8px"></div>
             </div>
         </div>
         <div id="rca-output" style="display:none;">
@@ -507,6 +508,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="card"><div class="card-title">📈 Confidence Evolution</div><div id="inv-conf"></div></div>
                 <div class="card"><div class="card-title">🏅 Investigation Quality</div><div id="inv-quality"></div></div>
             </div>
+            <div class="rca-grid">
+                <div class="card"><div class="card-title">📚 Similar Past Incidents</div><div id="inv-similar"></div></div>
+                <div class="card"><div class="card-title">🧠 Post-Fix Learning</div><div id="inv-learning"></div></div>
+            </div>
             <div class="card"><div class="card-title">🛡 Challenge RCA <span style="font-size:.72rem;color:var(--text-muted);font-weight:400">answers use only collected incident evidence</span></div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px" id="challenge-suggest"></div>
                 <div style="display:flex;gap:6px"><input id="challenge-q" placeholder="Why do you think this is not a database outage?" aria-label="Challenge the RCA conclusion" style="flex:1;background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px" /><button class="btn btn-primary" onclick="submitChallenge()">Ask</button></div>
@@ -527,7 +532,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="card"><div class="card-title">⚖ Before / After Verification</div><div id="inv-verify"></div></div>
             </div>
         </div>
-        <div id="sec-timeline" style="display:none"><div class="card"><div class="card-title">⏱ Incident Timeline</div><div id="inv-timeline"></div></div></div>
+        <div id="sec-timeline" style="display:none"><div class="card"><div class="card-title">⏱ Incident Timeline</div><div id="inv-timeline"></div></div>
+        <div class="rca-grid">
+            <div class="card"><div class="card-title">⏪ Replay Investigation <span style="font-size:.72rem;color:var(--text-muted);font-weight:400">stored events — does not rerun RCA</span></div><div id="inv-replay"></div></div>
+            <div class="card"><div class="card-title">⚖ Compare RCA Runs</div><div id="inv-compare"></div></div>
+        </div></div>
             <div class="grid" id="sec-gov">
                 <div class="card"><div class="card-title">Approval Timeline</div><div id="approval-timeline"><span style="color:var(--text-muted);font-size:.8rem">No approval events yet.</span></div></div>
                 <div class="card"><div class="card-title">Related Pull Request</div><div id="related-pr"><span style="font-size:.8rem;color:var(--text-muted)">No pull request raised for this incident.</span></div></div>
@@ -912,8 +921,22 @@ async function sendDecision(id, isApprove, action, incident, risk){
 async function approve(id){ return sendDecision(id,true); }
 async function reject(id){ return sendDecision(id,false); }
 async function runRCA(){ const out=document.getElementById('rca-output'); out.style.display='none'; const res=await fetch('/api/analyze/'+currentIncident); const data=await res.json(); renderRCA(data); }
+const AGENT_PHASES=['supervisor_plan','log_agent','metrics_agent','deployment_agent','trace_agent','knowledge_agent','hypotheses','critic','blast_radius','report'];
+const AGENT_LABELS={supervisor_plan:'Supervisor plan',log_agent:'Log Agent',metrics_agent:'Metrics Agent',deployment_agent:'Deployment Agent',trace_agent:'Trace Agent',knowledge_agent:'Knowledge Agent',hypotheses:'Hypotheses',critic:'Critic',blast_radius:'Blast Radius',report:'Final Report'};
+let PROG_TIMER=null;
+function renderProgress(events){
+  const box=document.getElementById('agent-progress'); if(!box) return;
+  const done=new Set((events||[]).map(e=>e.stage));
+  box.innerHTML='<div class="card-title" style="font-size:.9rem">Investigation in Progress</div>'+AGENT_PHASES.map(s=>{
+    const ev=(events||[]).find(e=>e.stage===s);
+    const mark=ev?'✓':(done.size?'○':'○');
+    return `<div style="font-size:.8rem;margin-top:3px">${mark} <strong>${AGENT_LABELS[s]}</strong>${ev?`<br/><span style="color:var(--text-muted)">${esc(ev.detail||'')} · ${esc((ev.at||'').slice(11,19))}</span>`:' <span style="color:var(--text-muted)">pending</span>'}</div>`;
+  }).join('');
+}
 async function runLiveRCA(){
   const btn=document.getElementById('rca-btn'); btn.disabled=true; btn.innerText='Working…';
+  renderProgress([]);
+  if(LAST_INCIDENT){ clearInterval(PROG_TIMER); PROG_TIMER=setInterval(async()=>{ try{ const p=await (await fetch('/api/incidents/'+LAST_INCIDENT+'/rca-progress')).json(); if(p.events) renderProgress(p.events); }catch(e){} },800); }
   const target=liveIncidentFile||currentIncident;
   // Use multi-agent live endpoint whenever a simulation ran, else static file
   const useLive=!!(liveScenario||liveIncidentFile);
@@ -927,6 +950,8 @@ async function runLiveRCA(){
   // If live returned approval, show it with message box + focus (sync poll signature so next poll won't rebuild it)
   if(data.approval){ const ap=data.approval; _lastApprSig=ap.approval_id+':'+ap.status; document.getElementById('approval-box').innerHTML=_approvalCard(ap,true); const inp=document.getElementById('msg-'+ap.approval_id); if(inp) inp.focus(); }
   btn.disabled=false; btn.innerText='Run Live RCA';
+  clearInterval(PROG_TIMER);
+  if(data.progress) renderProgress(data.progress);
   fetchLogs();
   if(data.incident_id||LAST_INCIDENT){ const _iid=data.incident_id||LAST_INCIDENT; renderHero(_iid); if(INV_TAB==='investigation'||INV_TAB==='summary') loadInvestigation(_iid); }
   if(useLive&&data.incident_id){
@@ -1566,6 +1591,7 @@ async function loadInvestigation(incident_id){
       (q.factors||[]).map(f=>`<div style="font-size:.78rem;margin-top:4px">${esc(f.name)}: <strong>${f.points}/${f.max_points}</strong> <span style="color:var(--text-muted)">(${esc(f.status)})</span><br/><span style="color:var(--text-muted)">${esc(f.note)}</span></div>`).join('')+
       (q.deductions&&q.deductions.length?`<div style="margin-top:6px;font-size:.76rem;color:var(--text-muted)"><strong>Deductions:</strong><br/>${q.deductions.map(esc).join('<br/>')}</div>`:'');
   }catch(e){}
+  if(incident_id) loadLearning(incident_id);
   const sug=document.getElementById('challenge-suggest');
   if(sug) sug.innerHTML=['Why do you think this is not a database outage?','What evidence points to the deployment?','Why are you blaming this file?','What would lower your confidence?','Could this be traffic overload?'].map(q=>`<button class="sim-btn" onclick="document.getElementById('challenge-q').value='${q.replace(/'/g,"")}';submitChallenge()">${esc(q)}</button>`).join('');
 }
@@ -1676,7 +1702,32 @@ async function loadFixIntel(incident_id){
       (v.summary?`<div style="font-size:.8rem;color:var(--text-muted);margin-top:4px">${esc(v.summary)}</div>`:'');
   }catch(e){ document.getElementById('inv-verify').innerHTML='<p style="color:var(--text-muted)">No verification recorded yet.</p>'; }
 }
+async function loadLearning(incident_id){
+  try{
+    const s=await (await fetch('/api/incidents/'+incident_id+'/similar-incidents')).json();
+    document.getElementById('inv-similar').innerHTML=
+      (s.matches||[]).map(m=>`<div class="evidence-box"><strong>${esc(m.incident_id)}</strong> <span class="pill info">${Math.round((m.similarity||0)*100)}% similar</span><br/>${esc(m.root_cause||m.root_cause_category||'')} · ${esc(m.service||'')} · ${esc(m.final_status||'')}<br/><span style="font-size:.72rem;color:var(--text-muted)">matched on: ${esc((m.matched_on||[]).join(', '))}</span></div>`).join('')||'<p style="color:var(--text-muted)">No similar past incidents found.</p>'+
+      (s.historical_evidence&&s.historical_evidence.length?`<div style="font-size:.78rem;color:var(--text-muted)">Historical evidence: ${s.historical_evidence.map(h=>esc(h.title||h.source_id)).join('; ')}</div>`:'');
+  }catch(e){}
+  try{
+    const l=await (await fetch('/api/incidents/'+incident_id+'/learning')).json();
+    document.getElementById('inv-learning').innerHTML=l.in_memory?
+      `<div class="evidence-box">✓ ${esc(l.message)}</div>`+(l.lessons||[]).map(x=>`<div class="evidence-box">• ${esc(x)}</div>`).join('')
+      :`<p style="color:var(--text-muted)">${esc(l.message||'Not in memory yet.')}</p>`;
+  }catch(e){}
+}
 async function loadInvTimeline(incident_id){
+  loadLearning(incident_id);
+  try{
+    const rp=await (await fetch('/api/incidents/'+incident_id+'/replay')).json();
+    document.getElementById('inv-replay').innerHTML=(rp.events||[]).map(e=>`<div style="font-size:.78rem;margin-bottom:6px"><span class="pill info">${esc(e.kind)}</span> <strong>${esc(e.title)}</strong><br/><span style="color:var(--text-muted)">${esc(e.detail||'')} ${esc(e.at||'')}</span></div>`).join('')||'<p>—</p>';
+  }catch(e){}
+  try{
+    const cr=await (await fetch('/api/incidents/'+incident_id+'/rca-comparison')).json();
+    document.getElementById('inv-compare').innerHTML=(cr.runs||[]).map(r=>`<div class="evidence-box"><strong>Run #${r.run}</strong> ${esc(r.category)} · ${Math.round((r.confidence||0)*100)}% · ${esc(r.at||'')}</div>`).join('')+
+      (cr.deltas||[]).map(d=>`<div style="font-size:.8rem;margin-top:4px">Run ${d.from_run} → ${d.to_run}: confidence ${d.confidence_delta_pct>=0?'+':''}${d.confidence_delta_pct}%${d.hypothesis_changed?` · hypothesis changed: ${esc(d.from_category)} → ${esc(d.to_category)}`:''}</div>`).join('')+
+      (cr.note?`<div style="font-size:.78rem;color:var(--text-muted)">${esc(cr.note)}</div>`:'');
+  }catch(e){}
   try{
     const t=await (await fetch('/api/incidents/'+incident_id+'/timeline?view=significant')).json();
     const evs=t.events||[];
@@ -2555,7 +2606,13 @@ async def run_live_rca(body: dict = None):
     import time as _time
     _started = _time.time()
     wf = InvestigationWorkflow()
-    state = await asyncio.to_thread(wf.run, ev)
+    LAST_PROGRESS[ev.incident_id] = []
+    def _prog(evt):
+        LAST_PROGRESS[ev.incident_id].append(evt)
+        while len(LAST_PROGRESS) > 20:
+            LAST_PROGRESS.pop(next(iter(LAST_PROGRESS)))
+    import functools as _ft
+    state = await asyncio.to_thread(_ft.partial(wf.run, ev, progress_cb=_prog))
     _duration = round(_time.time() - _started, 1)
     audit_log("RCA_LIVE", ev.incident_id, "web-user", "investigation_complete",
               ev.service_name)
@@ -2568,6 +2625,7 @@ async def run_live_rca(body: dict = None):
     # add simulated logs hint
     result["live_logs_count"] = len(SIMULATED_LOGS)
     result["remediation_available"] = True
+    result["progress"] = list(LAST_PROGRESS.get(ev.incident_id, []))
     # remember validated RCA for the code-fix pipeline (Part 5+)
     _best_cat, _best_conf = None, 0.0
     for _v in state.validated_hypotheses:
@@ -4298,6 +4356,73 @@ def investigation_verification(incident_id: str):
     if out is None:
         raise HTTPException(status_code=404, detail="No verification recorded for this incident yet")
     return {"incident_id": incident_id, **out}
+
+
+# ================= Investigation platform (Phase 3a: learning + replay) =================
+
+LAST_PROGRESS: Dict[str, list] = {}
+
+
+@app.get("/api/incidents/{incident_id}/similar-incidents")
+def investigation_similar(incident_id: str, limit: int = 5):
+    from tools.investigation import similar_incidents
+    from memory.store import MemoryStore
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    ev = getattr(ctx["state"], "incident_evidence", None)
+    rep = getattr(ctx["state"], "final_report", None)
+    matches = similar_incidents(
+        getattr(ev, "service_name", "") if ev is not None else "",
+        list(getattr(rep, "primary_symptoms", []) or [])[:3] if rep is not None else [],
+        ctx["rca"].get("root_cause_category", ""),
+        store=MemoryStore(use_bigquery=False), limit=max(1, min(limit, 10)),
+        exclude_id=incident_id)
+    historical = [k.model_dump() for k in (getattr(ctx["state"], "knowledge_findings", []) or [])
+                  if getattr(k, "source_type", "") == "historical_incident"]
+    return {"incident_id": incident_id,
+            "matches": [m.model_dump() for m in matches],
+            "historical_evidence": historical[:5],
+            "note": ("Historical similarity informs confidence but never overrides "
+                     "contradictory current evidence.")}
+
+
+@app.get("/api/incidents/{incident_id}/learning")
+def investigation_learning(incident_id: str):
+    from tools.investigation import learning_view
+    from memory.store import MemoryStore
+    try:
+        mem = MemoryStore(use_bigquery=False).get(incident_id)
+    except Exception:
+        mem = None
+    return {"incident_id": incident_id, **learning_view(mem)}
+
+
+@app.get("/api/incidents/{incident_id}/replay")
+def investigation_replay(incident_id: str):
+    from tools.investigation import replay_events
+    ctx = _inv_ctx(incident_id)
+    if ctx["state"] is None:
+        raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
+    return {"incident_id": incident_id, "replayed": True,
+            "events": replay_events(ctx["state"], ctx["rec"])}
+
+
+@app.get("/api/incidents/{incident_id}/rca-comparison")
+def investigation_compare(incident_id: str):
+    from tools.investigation import compare_runs
+    rec = _registry().get(incident_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return {"incident_id": incident_id, **compare_runs(rec.get("rca_runs", []))}
+
+
+@app.get("/api/incidents/{incident_id}/rca-progress")
+def investigation_progress(incident_id: str):
+    events = LAST_PROGRESS.get(incident_id)
+    if not events:
+        raise HTTPException(status_code=404, detail="No RCA progress recorded for this incident")
+    return {"incident_id": incident_id, "events": events}
 
 
 # Keep original analyze endpoint
