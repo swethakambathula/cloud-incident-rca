@@ -363,7 +363,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <span id="ws-project-chip" style="margin-left:8px;font-size:.78rem;color:var(--text-muted)"></span>
         <div class="header">
             <div><h1 id="inc-title">Google Cloud RCA Investigation</h1><p id="inc-desc" style="color:var(--text-muted);margin-top:4px">Select an incident or simulate errors below.</p><div id="inc-meta" style="font-size:.78rem;color:var(--text-muted);margin-top:6px"></div></div>
-            <button class="btn btn-green" id="rca-btn-top" onclick="runLiveRCA()" style="display:none">🧠 Do RCA (Live)</button>
+            <div><button class="btn btn-green btn-primary" id="rca-btn-top" onclick="runLiveRCA()" aria-describedby="rca-gate-top">Run RCA</button><p id="rca-gate-top" style="font-size:.78rem;color:var(--text-muted);margin-top:6px"></p></div>
         </div>
         <div id="wf-stepper" class="stepper" aria-label="RCA workflow progress"></div>
         <div id="inc-hero" class="card" style="margin-bottom:12px;display:none"></div>
@@ -949,6 +949,7 @@ function renderProgress(events){
 }
 async function runLiveRCA(){
   const btn=document.getElementById('rca-btn'); btn.disabled=true; btn.innerText='Working…';
+  updateRcaGate();
   renderProgress([]);
   if(LAST_INCIDENT){ clearInterval(PROG_TIMER); PROG_TIMER=setInterval(async()=>{ try{ const p=await (await fetch('/api/incidents/'+LAST_INCIDENT+'/rca-progress')).json(); if(p.events) renderProgress(p.events); }catch(e){} },800); }
   const target=liveIncidentFile||currentIncident;
@@ -964,6 +965,7 @@ async function runLiveRCA(){
   // If live returned approval, show it with message box + focus (sync poll signature so next poll won't rebuild it)
   if(data.approval){ _lastApprSig=''; fetchLogs(); }
   btn.disabled=false; btn.innerText='Run Live RCA';
+  updateRcaGate();
   clearInterval(PROG_TIMER);
   if(data.progress) renderProgress(data.progress);
   fetchLogs();
@@ -1947,10 +1949,18 @@ async function exportRca(fmt){
 }
 function updateRcaGate(){
   const btn=document.getElementById('rca-btn'); if(!btn) return;
-  if(btn.innerText.indexOf('Working')===0) return;
+  const top=document.getElementById('rca-btn-top');
+  const hint=document.getElementById('rca-gate-top');
+  if(btn.innerText.indexOf('Working')===0){
+    if(top){ top.disabled=true; top.innerText='Running RCA…'; }
+    if(hint) hint.innerText='Investigation in progress.';
+    return;
+  }
   const gate=document.getElementById('rca-gate');
   if(!LOGS.length){ btn.disabled=true; if(gate) gate.innerText='Waiting for sufficient evidence: no logs collected yet. Simulate an incident or upload logs first.'; }
   else{ btn.disabled=false; if(gate) gate.innerText='Run the RCA agent against the currently collected incident evidence. The agent will correlate logs, metrics, deployments, traces, infrastructure state, and code changes before proposing a root cause.'; }
+  if(top){ top.disabled=btn.disabled; top.innerText='Run RCA'; }
+  if(hint) hint.innerText=btn.disabled?'Simulate an incident or upload logs to enable RCA.':'';
 }
 
 

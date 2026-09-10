@@ -31,7 +31,12 @@ const {chromium} = require('playwright');
       for(const view of ['home','projects','incidents','approvals']){
         await page.evaluate(view=>showView(view),view);
         if(view==='approvals') await page.evaluate(()=>loadApprovalCenter());
-        if(view==='incidents') await page.evaluate(()=>openIncident('INC-006-CONFIG-REGRESSION'));
+        if(view==='incidents'){
+          await page.evaluate(()=>openIncident('INC-006-CONFIG-REGRESSION'));
+          assert.equal(await page.locator('#rca-btn-top').isVisible(),true);
+          const rcaBox=await page.locator('#rca-btn-top').boundingBox();
+          assert.ok(rcaBox.y+rcaBox.height<height,'Run RCA visible in first viewport');
+        }
         const boxes=await page.evaluate(()=>{
           const side=document.querySelector('.sidebar'),main=document.querySelector('main');
           return {side:side.getBoundingClientRect().toJSON(),main:main.getBoundingClientRect().toJSON(),overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
@@ -69,6 +74,18 @@ const {chromium} = require('playwright');
       await page.evaluate(a=>renderRemediation({action:a.action},a,'ALLOWED_WITH_APPROVAL'),{...approval,...extra});
       assert.equal(await page.locator('#remediation-box button').filter({hasText:'Execute & Verify'}).count(),0);
     }
+    await page.evaluate(()=>{LOGS=[];updateRcaGate();});
+    assert.equal(await page.locator('#rca-btn-top').isDisabled(),true);
+    await page.evaluate(()=>{LOGS=[{message:'Fixture evidence'}];updateRcaGate();});
+    assert.equal(await page.locator('#rca-btn-top').isEnabled(),true);
+    await page.evaluate(()=>{
+      showView('incidents');
+      document.getElementById('incident-workspace').style.display='block';
+      window.rcaClicks=0;
+      runLiveRCA=()=>{window.rcaClicks++;};
+    });
+    await page.locator('#rca-btn-top').click();
+    assert.equal(await page.evaluate(()=>window.rcaClicks),1,'Header invokes the RCA handler');
     await page.setViewportSize({width:1440,height:900});
     await page.evaluate(()=>{
       document.querySelector('.proj-row .lbl').textContent='INC-006-CONFIG-REGRESSION'.repeat(12);
