@@ -424,7 +424,13 @@ function colorDiff(patch){
 async function generateFix(regen){
   if(!LAST_INCIDENT){ alert('Run live RCA first'); return; }
   setCfBadge(regen?'Regenerating…':'Generating fix…');
-  const data=await (await fetch('/api/incidents/'+LAST_INCIDENT+'/generate-fix',{method:'POST'})).json();
+  // clear previous run's branch/PR/tests so a fresh failure never shows stale success
+  document.getElementById('cf-pr').innerHTML='';
+  document.getElementById('cf-tests').innerHTML='';
+  document.getElementById('cf-lifecycle').innerText='Status: '+(regen?'Regenerating…':'Generating fix…');
+  const r0=await fetch('/api/incidents/'+LAST_INCIDENT+'/generate-fix',{method:'POST'});
+  const data=await r0.json();
+  if(!r0.ok){ document.getElementById('cf-diff-wrap').style.display='none'; const nf=document.getElementById('cf-no-fix'); nf.style.display='block'; nf.innerText=data.detail||'Fix generation failed'; document.getElementById('cf-lifecycle').innerText='Status: Failed'; setCfBadge('Failed', false); fetchLogs(); return; }
   if(data.investigation) renderInvestigation(data.investigation);
   const dw=document.getElementById('cf-diff-wrap'), nf=document.getElementById('cf-no-fix');
   if(data.proposal){
@@ -810,7 +816,13 @@ def _demo_repo() -> str:
 @app.post("/api/incidents/{incident_id}/analyze-code")
 async def analyze_code(incident_id: str):
     from agents.code_investigation_agent.agent import CodeInvestigationAgent
+    from gitops.branch_manager import checkout_base
     rca = _get_rca(incident_id)
+    # Always inspect clean base state, never a leftover previous fix branch
+    try:
+        await asyncio.to_thread(checkout_base, _demo_repo())
+    except (RuntimeError, PermissionError) as e:
+        raise HTTPException(status_code=409, detail=str(e)[:500])
     inv = await asyncio.to_thread(
         CodeInvestigationAgent().investigate, incident_id, rca["root_cause_category"])
     audit_log("CODE_INVESTIGATED", incident_id, "CodeInvestigationAgent",
@@ -822,7 +834,12 @@ async def analyze_code(incident_id: str):
 async def generate_fix(incident_id: str):
     from agents.code_investigation_agent.agent import CodeInvestigationAgent
     from agents.patch_agent.agent import PatchAgent
+    from gitops.branch_manager import checkout_base
     rca = _get_rca(incident_id)
+    try:
+        await asyncio.to_thread(checkout_base, _demo_repo())
+    except (RuntimeError, PermissionError) as e:
+        raise HTTPException(status_code=409, detail=str(e)[:500])
     inv = await asyncio.to_thread(
         CodeInvestigationAgent().investigate, incident_id, rca["root_cause_category"])
     if inv.no_fix_reason or not inv.findings:

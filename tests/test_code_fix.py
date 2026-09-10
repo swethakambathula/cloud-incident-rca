@@ -135,6 +135,46 @@ def test_regeneration_invalidates_prior_approval(demo_repo):
 
 # --- branch safety ---
 
+def test_branch_names_unique_across_repeat_runs(demo_repo):
+    from gitops.branch_manager import checkout_base
+    b1 = create_fix_branch(demo_repo, "INC-004-X", "dependency_failure")
+    assert b1 == "rca/INC-004-X-dependency-failure"
+    run_git(demo_repo, ["checkout", "main"])
+    b2 = create_fix_branch(demo_repo, "INC-004-X", "dependency_failure")
+    assert b2 == "rca/INC-004-X-dependency-failure-2"
+    assert b1 != b2
+    # checkout_base returns investigation to clean faulty base
+    assert checkout_base(demo_repo) == "main"
+    content = open(os.path.join(demo_repo, "services/checkout/dependencies.py")).read()
+    assert "ORDERS_TIMEOUT_S = 1" in content
+
+
+def test_repeat_flow_succeeds_after_prior_success(demo_repo, monkeypatch):
+    """Regression: a second RCA->fix cycle for the same incident must investigate
+    faulty base code, not the previous fix branch's committed patch."""
+    import gitops.pr_manager as prm
+    iid = _seed_rca("INC-004-REPEAT", "dependency_failure")
+    c = _client()
+    monkeypatch.setattr(prm, "create_pr",
+                        lambda repo, branch, base, title, body: {
+                            "pr_url": "https://github.com/x/y/pull/9", "pr_number": 9})
+    for _ in range(2):
+        assert c.post(f"/api/incidents/{iid}/generate-fix").status_code == 200
+        c.post(f"/api/incidents/{iid}/fix/approve", json={"message": "again"})
+        r = c.post(f"/api/incidents/{iid}/fix/apply", timeout=300).json()
+        assert r["fix_status"] == "PR Created", r["job"].get("error")
+
+
+def test_dirty_tree_blocks_generate_with_clear_message(demo_repo):
+    iid = _seed_rca("INC-004-DIRTY", "dependency_failure")
+    c = _client()
+    with open(os.path.join(demo_repo, "services/checkout/dependencies.py"), "a") as f:
+        f.write("\n# uncommitted local experiment\n")
+    r = c.post(f"/api/incidents/{iid}/generate-fix")
+    assert r.status_code == 409
+    assert "dirty" in r.json()["detail"].lower() or "previous" in r.json()["detail"].lower()
+
+
 def test_branch_naming_and_main_untouched(demo_repo):
     main_sha = run_git(demo_repo, ["rev-parse", "main"])
     branch = create_fix_branch(demo_repo, "INC-002-POOL", "connection_pool_exhaustion")
