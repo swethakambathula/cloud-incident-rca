@@ -7,7 +7,7 @@ import glob
 import json
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from typing import Dict, List
+from typing import Dict, List, Optional
 import uvicorn
 
 from agents.rca_agent.agent import CloudRCAAgent
@@ -24,6 +24,174 @@ from orchestration.incident_state_machine import IncidentStateMachine, IncidentS
 from audit.logger import audit_log
 import asyncio
 import time
+
+# SQLite persistence layer
+from storage.sqlite_store import get_store, SQLiteStore
+from storage.models import (
+    ApprovalModel, FixJobModel, CodeFixModel, RCARunModel,
+    PullRequestModel, IncidentMemoryModel
+)
+
+# Initialize SQLite store
+_sqlite_store = get_store()
+
+# Backward-compatible wrappers for in-memory stores
+# These provide the same interface but persist to SQLite
+
+def _save_approval_to_sqlite(req) -> None:
+    """Save approval to SQLite."""
+    approval = ApprovalModel(
+        approval_id=req.approval_id,
+        incident_id=req.incident_id,
+        action=req.action,
+        target_resource=req.target_resource,
+        rationale=req.rationale,
+        root_cause=req.root_cause,
+        confidence=req.confidence,
+        risk=req.risk.value if hasattr(req.risk, 'value') else str(req.risk),
+        expected_impact=req.expected_impact,
+        rollback_plan=req.rollback_plan,
+        expiration_time=req.expiration_time,
+        status=req.status.value if hasattr(req.status, 'value') else str(req.status),
+        action_type=req.action_type.value if hasattr(req.action_type, 'value') else str(req.action_type),
+        patch_sha256=req.patch_sha256 or "",
+        decided_at=req.decided_at or "",
+        decided_by=req.decided_by or "",
+        decided_message=req.decided_message or "",
+        requested_at=req.requested_at,
+        execution_status="",
+        execution_result_json="{}"
+    )
+    _sqlite_store.save_approval(approval)
+
+def _update_approval_in_sqlite(req) -> None:
+    """Update approval in SQLite."""
+    approval = ApprovalModel(
+        approval_id=req.approval_id,
+        incident_id=req.incident_id,
+        action=req.action,
+        target_resource=req.target_resource,
+        rationale=req.rationale,
+        root_cause=req.root_cause,
+        confidence=req.confidence,
+        risk=req.risk.value if hasattr(req.risk, 'value') else str(req.risk),
+        expected_impact=req.expected_impact,
+        rollback_plan=req.rollback_plan,
+        expiration_time=req.expiration_time,
+        status=req.status.value if hasattr(req.status, 'value') else str(req.status),
+        action_type=req.action_type.value if hasattr(req.action_type, 'value') else str(req.action_type),
+        patch_sha256=req.patch_sha256 or "",
+        decided_at=req.decided_at or "",
+        decided_by=req.decided_by or "",
+        decided_message=req.decided_message or "",
+        requested_at=req.requested_at,
+        execution_status=req.execution_status or "",
+        execution_result_json=json.dumps(req.execution_result or {})
+    )
+    _sqlite_store.save_approval(approval)
+
+def _get_approval_from_sqlite(approval_id: str):
+    """Get approval from SQLite."""
+    return _sqlite_store.get_approval(approval_id)
+
+def _list_pending_approvals_from_sqlite():
+    """List pending approvals from SQLite."""
+    return _sqlite_store.list_pending_approvals()
+
+def _list_recent_approvals_from_sqlite(limit: int = 10):
+    """List recent approvals from SQLite."""
+    return _sqlite_store.list_recent_approvals(limit)
+
+def _save_fix_job_to_sqlite(incident_id: str, job: FixJobModel) -> None:
+    """Save fix job to SQLite."""
+    _sqlite_store.save_fix_job(job)
+
+def _get_fix_job_from_sqlite(incident_id: str) -> Optional[FixJobModel]:
+    """Get fix job from SQLite."""
+    return _sqlite_store.get_fix_job_by_incident(incident_id)
+
+def _save_code_fix_to_sqlite(incident_id: str, fix: CodeFixModel) -> None:
+    """Save code fix to SQLite."""
+    _sqlite_store.save_code_fix(fix)
+
+def _get_code_fix_from_sqlite(incident_id: str) -> Optional[CodeFixModel]:
+    """Get code fix from SQLite."""
+    return _sqlite_store.get_code_fix_by_incident(incident_id)
+
+def _save_rca_to_sqlite(incident_id: str, rca_data: dict) -> None:
+    """Save RCA summary to SQLite."""
+    # Find the latest RCA run for this incident
+    runs = _sqlite_store.list_rca_runs(incident_id=incident_id, limit=1)
+    rca_run_id = runs[0].id if runs else ""
+    
+    rca = RCARunModel(
+        id=f"RCA-{incident_id}-{len(runs)+1}",
+        incident_id=incident_id,
+        analysis_session_id="",
+        status="COMPLETED",
+        root_cause_code=rca_data.get("root_cause_category", ""),
+        root_cause_summary=rca_data.get("root_cause", ""),
+        confidence=rca_data.get("confidence", 0.0),
+        quality_score=0.0,
+        requires_remediation=1,
+        requires_code_fix=1 if rca_data.get("proposal") else 0,
+        requires_approval=1,
+        requires_pr=1,
+        result_json=json.dumps(rca_data),
+        created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        started_at="",
+        completed_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        error=""
+    )
+    _sqlite_store.save_rca_run(rca)
+
+def _get_rca_from_sqlite(incident_id: str) -> dict:
+    """Get RCA summary from SQLite."""
+    run = _sqlite_store.get_latest_rca_run(incident_id)
+    if run:
+        return json.loads(run.result_json)
+    return {}
+
+def _save_investigation_to_sqlite(incident_id: str, state, category: str) -> None:
+    """Save investigation state reference to SQLite."""
+    # We store the category and a reference; full state is in LAST_INVESTIGATION for active use
+    pass  # The investigation state is kept in memory for active use; SQLite stores the RCA run
+
+def _append_activity_to_sqlite(event: str, incident_id: str, actor: str, description: str, metadata: dict = None):
+    """Append activity event to SQLite."""
+    _sqlite_store.append_activity(event, incident_id, actor, description, metadata)
+
+# Monkey-patch the global_approval_manager to also persist to SQLite
+_original_create_request = global_approval_manager.create_request
+def _patched_create_request(*args, **kwargs):
+    req = _original_create_request(*args, **kwargs)
+    _save_approval_to_sqlite(req)
+    return req
+global_approval_manager.create_request = _patched_create_request
+
+_original_approve = global_approval_manager.approve
+def _patched_approve(approval_id, approver="human-operator", message=None):
+    req = _original_approve(approval_id, approver, message)
+    if req:
+        _update_approval_in_sqlite(req)
+    return req
+global_approval_manager.approve = _patched_approve
+
+_original_reject = global_approval_manager.reject
+def _patched_reject(approval_id, approver="human-operator", message=None):
+    req = _original_reject(approval_id, approver, message)
+    if req:
+        _update_approval_in_sqlite(req)
+    return req
+global_approval_manager.reject = _patched_reject
+
+_original_cancel = global_approval_manager.cancel
+def _patched_cancel(approval_id):
+    req = _original_cancel(approval_id)
+    if req:
+        _update_approval_in_sqlite(req)
+    return req
+global_approval_manager.cancel = _patched_cancel
 
 def _investigate_and_plan(ev):
     """Blocking multi-agent workflow + remediation plan. Must run in a thread (asyncio.to_thread)."""
@@ -126,7 +294,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .sim-btn{padding:9px 14px;border-radius:6px;border:1px solid var(--border-color);background:#20242a;color:var(--text-main);font-size:.82rem;font-weight:600;cursor:pointer;min-height:36px}
         .sim-btn:disabled{opacity:.5;cursor:not-allowed}
         .sim-btn:hover{border-color:#d9d9d9;background:#1c1c1c}
-        .log-panel{background:#000000;border:1px solid var(--border-color);border-radius:8px;padding:12px;height:260px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.5}
+        .log-panel{background:#000000;border:1px solid var(--border-color);border-radius:8px;padding:12px;min-height:320px;height:clamp(320px, 42vh, 560px);overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:.78rem;line-height:1.5}
         .log-line{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.07)} .log-error{color:#ffffff;font-weight:700} .log-warn{color:#b5b5b5;font-weight:600} .log-info{color:var(--text-muted)}
         .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:20px;margin-bottom:20px}
         .card{background:var(--card-bg);border:1px solid var(--border-color);border-radius:10px;padding:20px;box-shadow:0 8px 20px rgba(0,0,0,.3)}
@@ -414,7 +582,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
             <span id="live-status" style="margin-left:auto;font-size:.78rem;color:var(--text-muted)"><span class="status-dot dot-green"></span>Live</span>
         </div>
-        <div class="grid" id="sec-live">
+        <div class="grid" id="sec-live" style="min-height: 400px;">
             <div class="card" style="grid-column: span 2;">
                 <div class="card-title">📡 Live Logs <span style="font-size:.75rem;color:var(--text-muted);font-weight:400">2 · Live Telemetry — auto-refresh, click Simulate to inject</span>
                     <button class="sim-btn" id="copy-logs-btn" onclick="copyLogs()" title="Copy visible logs" style="margin-left:auto">Copy</button>
@@ -1437,6 +1605,11 @@ async function openIncident(incident_id){
   LAST_INCIDENT=incident_id;
   currentIncident=meta&&meta.file||null;
   liveIncidentFile=null; liveScenario=null;
+  // Clear terminal for new incident
+  LOGS = [];
+  document.getElementById('live-logs').innerHTML = 'Waiting for simulated errors... Click any button above.';
+  document.getElementById('log-summary').innerHTML = 'No data yet — simulate an incident.';
+  _lastLogSig = '';
   document.getElementById('incidents-table-wrap').style.display='none';
   document.getElementById('incident-workspace').style.display='block';
   document.getElementById('inv-tabs').style.display='flex';
@@ -2787,17 +2960,15 @@ async def run_live_rca(body: dict = None):
                 _best_cat, _best_conf = _h.root_cause_category, _v.adjusted_confidence
     _best_cat = _best_cat or (state.hypotheses[0].root_cause_category if state.hypotheses else "unknown")
     result["root_cause_category"] = _best_cat
-    LAST_RCA[ev.incident_id] = {
+    _save_rca_cache(ev.incident_id, {
         "root_cause_category": _best_cat,
         "root_cause": state.final_report.root_cause,
         "confidence": state.final_report.confidence,
         "supporting_evidence": state.final_report.supporting_evidence,
         "contradictory_evidence": state.final_report.contradictory_evidence,
         "service": ev.service_name,
-    }
-    LAST_INVESTIGATION[ev.incident_id] = {"state": state, "category": _best_cat}
-    while len(LAST_INVESTIGATION) > 20:
-        LAST_INVESTIGATION.pop(next(iter(LAST_INVESTIGATION)))
+    })
+    _save_investigation_cache(ev.incident_id, state, _best_cat)
     try:
         _domain, _sub = domain_for_category(_best_cat)
         result["error_domain"], result["error_subcategory"] = _domain, _sub
@@ -2819,10 +2990,61 @@ async def run_live_rca(body: dict = None):
 # --- Code fix + PR pipeline (Parts 5-15, 19) ---
 from schemas.code_fix import FixJob, FixStatus
 
+# In-memory caches (bounded) with SQLite persistence
 FIX_JOBS = {}  # incident_id -> {"job": FixJob, "proposal": PatchProposal|None, "approval_id": str|None}
 LAST_RCA = {}  # incident_id -> validated RCA summary for code mapping
 LAST_INVESTIGATION = {}  # incident_id -> {"state": InvestigationState, "category": str} (bounded, for explicit remediation proposals)
 APPROVAL_PARAMS = {}  # approval_id -> suggested executor params (rollback target, scale bounds)
+
+def _save_fix_job_cache(incident_id: str, entry: dict) -> None:
+    """Save fix job entry to both memory and SQLite."""
+    FIX_JOBS[incident_id] = entry
+    # Persist to SQLite
+    job = entry.get("job")
+    if job:
+        _save_fix_job_to_sqlite(incident_id, job)
+    fix = entry.get("proposal")
+    if fix:
+        _save_code_fix_to_sqlite(incident_id, fix)
+
+def _load_fix_job_cache(incident_id: str) -> Optional[dict]:
+    """Load fix job entry from SQLite if not in memory."""
+    if incident_id in FIX_JOBS:
+        return FIX_JOBS[incident_id]
+    job = _get_fix_job_from_sqlite(incident_id)
+    fix = _get_code_fix_from_sqlite(incident_id)
+    if job or fix:
+        entry = {"job": job, "proposal": fix, "approval_id": job.approval_id if job else None}
+        FIX_JOBS[incident_id] = entry
+        return entry
+    return None
+
+def _save_rca_cache(incident_id: str, rca_data: dict) -> None:
+    """Save RCA to both memory and SQLite."""
+    LAST_RCA[incident_id] = rca_data
+    _save_rca_to_sqlite(incident_id, rca_data)
+
+def _load_rca_cache(incident_id: str) -> Optional[dict]:
+    """Load RCA from SQLite if not in memory."""
+    if incident_id in LAST_RCA:
+        return LAST_RCA[incident_id]
+    rca = _get_rca_from_sqlite(incident_id)
+    if rca:
+        LAST_RCA[incident_id] = rca
+        return rca
+    return None
+
+def _save_investigation_cache(incident_id: str, state, category: str) -> None:
+    """Save investigation to both memory and SQLite."""
+    LAST_INVESTIGATION[incident_id] = {"state": state, "category": category}
+    # Bound the cache
+    while len(LAST_INVESTIGATION) > 20:
+        LAST_INVESTIGATION.pop(next(iter(LAST_INVESTIGATION)))
+    _save_investigation_to_sqlite(incident_id, state, category)
+
+def _load_investigation_cache(incident_id: str) -> Optional[dict]:
+    """Load investigation from memory (SQLite doesn't store full state)."""
+    return LAST_INVESTIGATION.get(incident_id)
 
 
 def _record_agent_pr(incident_id, rca, proposal, approval_req, job, branch, base, title, body):
@@ -2898,6 +3120,8 @@ def _suggest_infra_params(evidence, action: str) -> dict:
 def _get_rca(incident_id: str) -> dict:
     rca = LAST_RCA.get(incident_id)
     if not rca:
+        rca = _load_rca_cache(incident_id)
+    if not rca:
         raise HTTPException(status_code=400, detail=f"No validated RCA for {incident_id}: click 'Run Live RCA' first")
     return rca
 
@@ -2916,6 +3140,8 @@ async def propose_remediation(incident_id: str):
     automatically — the dashboard calls this only via Propose Remediation.
     """
     entry = LAST_INVESTIGATION.get(incident_id)
+    if not entry:
+        entry = _load_investigation_cache(incident_id)
     if not entry:
         raise HTTPException(status_code=400, detail=f"No live investigation for {incident_id}: click 'Run Live RCA' first")
     state, cat = entry["state"], entry["category"]
@@ -2985,6 +3211,8 @@ def incident_timeline(incident_id: str, view: str = "significant"):
     from tools.timeline_view import group_events, significant
     entry = LAST_INVESTIGATION.get(incident_id)
     if not entry:
+        entry = _load_investigation_cache(incident_id)
+    if not entry:
         raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
     events = [t.model_dump() for t in entry["state"].final_report.timeline]
     if view == "all":
@@ -3001,6 +3229,8 @@ def incident_raw_evidence(incident_id: str, limit: int = 100):
     """Raw evidence drawer backing: logs, metrics, deployments, traces, agent
     findings. Read-only; the human-readable RCA stays the primary report."""
     entry = LAST_INVESTIGATION.get(incident_id)
+    if not entry:
+        entry = _load_investigation_cache(incident_id)
     if not entry:
         raise HTTPException(status_code=404, detail="No stored investigation for this incident: run RCA first")
     state = entry["state"]
@@ -3030,6 +3260,8 @@ def approval_revisions(approval_id: str):
     if not req:
         raise HTTPException(status_code=404, detail="Approval not found")
     entry = LAST_INVESTIGATION.get(req.incident_id)
+    if not entry:
+        entry = _load_investigation_cache(req.incident_id)
     if not entry:
         return {"approval_id": approval_id, "revisions": [], "suggested": None,
                 "hint": "No stored investigation for this incident; enter the revision manually."}
@@ -3087,8 +3319,8 @@ async def generate_fix(incident_id: str):
         job = FixJob(incident_id=incident_id, status=FixStatus.SUGGESTED,
                      root_cause_category=rca["root_cause_category"],
                      error=inv.no_fix_reason or "No safe code-level remediation identified.")
-        FIX_JOBS[incident_id] = {"job": job, "proposal": None, "approval_id": None,
-                                 "investigation": inv.model_dump()}
+        _save_fix_job_cache(incident_id, {"job": job, "proposal": None, "approval_id": None,
+                                  "investigation": inv.model_dump()})
         return {"investigation": inv.model_dump(), "proposal": None,
                 "fix_status": job.status.value, "no_fix_reason": job.error}
     try:
@@ -3100,8 +3332,8 @@ async def generate_fix(incident_id: str):
     except ValueError as e:
         job = FixJob(incident_id=incident_id, status=FixStatus.FAILED,
                      root_cause_category=rca["root_cause_category"], error=str(e))
-        FIX_JOBS[incident_id] = {"job": job, "proposal": None, "approval_id": None,
-                                 "investigation": inv.model_dump()}
+        _save_fix_job_cache(incident_id, {"job": job, "proposal": None, "approval_id": None,
+                                  "investigation": inv.model_dump()})
         return {"investigation": inv.model_dump(), "proposal": None,
                 "fix_status": job.status.value, "error": str(e)}
     approval = global_approval_manager.create_request(
@@ -3114,9 +3346,9 @@ async def generate_fix(incident_id: str):
     job = FixJob(incident_id=incident_id, status=FixStatus.WAITING_FOR_APPROVAL,
                  root_cause_category=rca["root_cause_category"],
                  patch_sha256=proposal.patch_sha256, approval_id=approval.approval_id)
-    FIX_JOBS[incident_id] = {"job": job, "proposal": proposal,
-                             "approval_id": approval.approval_id,
-                             "investigation": inv.model_dump()}
+    _save_fix_job_cache(incident_id, {"job": job, "proposal": proposal,
+                              "approval_id": approval.approval_id,
+                              "investigation": inv.model_dump()})
     audit_log("FIX_PROPOSED", incident_id, "PatchAgent", "code_fix_pr",
               approval.target_resource, approval_id=approval.approval_id,
               result=proposal.patch_sha256[:12])
@@ -3224,7 +3456,9 @@ async def apply_fix(incident_id: str):
         job.error = "Patch hash mismatch vs approval: re-approval required"
         raise HTTPException(status_code=409, detail=job.error)
     repo = _demo_repo()
-    rca = LAST_RCA.get(incident_id, {})
+    rca = LAST_RCA.get(incident_id)
+    if not rca:
+        rca = _load_rca_cache(incident_id) or {}
     try:
         job.status = FixStatus.APPROVED
         branch = await asyncio.to_thread(create_fix_branch, repo, incident_id, proposal.root_cause_category)
@@ -3846,17 +4080,17 @@ async def analyze_upload_legacy(analysis_id: str):
     best = next((h for h in state.hypotheses
                  if any(v.hypothesis_id == h.hypothesis_id and v.accepted
                         for v in state.validated_hypotheses)),
-                state.hypotheses[0] if state.hypotheses else None)
+              state.hypotheses[0] if state.hypotheses else None)
     category = best.root_cause_category if best else "unknown"
     domain, sub = domain_for_category(category)
-    LAST_RCA[incident_id] = {
+    _save_rca_cache(incident_id, {
         "root_cause_category": category, "root_cause": state.final_report.root_cause,
         "confidence": state.final_report.confidence,
         "supporting_evidence": state.final_report.supporting_evidence,
         "contradictory_evidence": state.final_report.contradictory_evidence,
         "service": service,
-    }
-    LAST_INVESTIGATION[incident_id] = {"state": state, "category": category}
+    })
+    _save_investigation_cache(incident_id, state, category)
     project_id = analysis.project_id
     _registry().ensure(incident_id, project_id=project_id, title=f"Uploaded logs RCA ({service})",
                        severity=ev.severity, services=[service], evidence_source="upload")
@@ -4192,20 +4426,20 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
         if (rec.get("source") or "").upper() == "SIMULATION":
             raise HTTPException(status_code=409, detail=(
                 "Cannot attach uploaded logs to a SIMULATED incident."))
-        LAST_RCA[incident_id] = {
+        _save_rca_cache(incident_id, {
             "root_cause_category": category, "root_cause": state.final_report.root_cause,
             "confidence": state.final_report.confidence,
             "supporting_evidence": state.final_report.supporting_evidence,
             "contradictory_evidence": state.final_report.contradictory_evidence,
-            "service": service}
-        LAST_INVESTIGATION[incident_id] = {"state": state, "category": category}
+            "service": service})
+        _save_investigation_cache(incident_id, state, category)
         record_activity("EVIDENCE_ATTACHED", incident_id, "web-user",
                         f"analysis {analysis_id} attached", {"analysis_id": analysis_id})
         out = dict(rca_payload)
         out.update({"analysis_id": analysis_id, "mode": "attach",
                     "incident_id": incident_id})
         return out
-    # mode=create (legacy): new LOG_UPLOAD incident
+# mode=create (legacy): new LOG_UPLOAD incident
     project_id = project_id or analysis.project_id or "unassigned"
     _registry().ensure(incident_id, project_id=project_id,
                        title=title or f"Uploaded logs RCA ({service})",
@@ -4214,13 +4448,13 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
                        evidence_source="upload")
     for target in ("COLLECTING_EVIDENCE", "ANALYZING", "ROOT_CAUSE_IDENTIFIED"):
         _bump(incident_id, target)
-    LAST_RCA[incident_id] = {
+    _save_rca_cache(incident_id, {
         "root_cause_category": category, "root_cause": state.final_report.root_cause,
         "confidence": state.final_report.confidence,
         "supporting_evidence": state.final_report.supporting_evidence,
         "contradictory_evidence": state.final_report.contradictory_evidence,
-        "service": service}
-    LAST_INVESTIGATION[incident_id] = {"state": state, "category": category}
+        "service": service})
+    _save_investigation_cache(incident_id, state, category)
     _registry().add_rca_run(incident_id, {"category": category,
                                           "confidence": state.final_report.confidence,
                                           "duration_s": duration, "evidence_source": "upload"})
@@ -4307,7 +4541,9 @@ def code_investigation_view(incident_id: str):
     """Structured code evidence: suspect file/line, evidence, recent diff, tests, confidences."""
     from agents.code_investigation_agent.agent import CodeInvestigationAgent
     rec = _registry().get(incident_id) or {}
-    rca = LAST_RCA.get(incident_id, {})
+    rca = LAST_RCA.get(incident_id)
+    if not rca:
+        rca = _load_rca_cache(incident_id) or {}
     project = None
     try:
         project = _projects().get(rec.get("project_id", ""))
@@ -4322,6 +4558,8 @@ def code_investigation_view(incident_id: str):
     stack_text = ""
     try:
         entry = LAST_INVESTIGATION.get(incident_id)
+        if not entry:
+            entry = _load_investigation_cache(incident_id)
         if entry:
             raw = entry["state"].incident_evidence.raw_evidence or []
             stack_text = " ".join(str(r.get("message", "")) for r in raw[:20])
@@ -4360,10 +4598,16 @@ def _inv_ctx(incident_id: str) -> dict:
     from projects.store import PRRegistry
     from memory.store import MemoryStore
     rec = _registry().get(incident_id) or {"incident_id": incident_id}
-    entry = LAST_INVESTIGATION.get(incident_id) or {}
+    entry = LAST_INVESTIGATION.get(incident_id)
+    if not entry:
+        entry = _load_investigation_cache(incident_id) or {}
     state = entry.get("state")
-    rca = LAST_RCA.get(incident_id, {})
-    fix_entry = FIX_JOBS.get(incident_id) or {}
+    rca = LAST_RCA.get(incident_id)
+    if not rca:
+        rca = _load_rca_cache(incident_id) or {}
+    fix_entry = FIX_JOBS.get(incident_id)
+    if not fix_entry:
+        fix_entry = _load_fix_job_cache(incident_id) or {}
     approvals = []
     try:
         for req in global_approval_manager._store.values():
@@ -4686,8 +4930,12 @@ def incident_demo_guide(incident_id: str):
     rec = _registry().get(incident_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Incident not found")
-    entry = LAST_INVESTIGATION.get(incident_id) or {}
-    fix_entry = FIX_JOBS.get(incident_id) or {}
+    entry = LAST_INVESTIGATION.get(incident_id)
+    if not entry:
+        entry = _load_investigation_cache(incident_id) or {}
+    fix_entry = FIX_JOBS.get(incident_id)
+    if not fix_entry:
+        fix_entry = _load_fix_job_cache(incident_id) or {}
     has_pr = bool(fix_entry.get("job") and
                   (fix_entry["job"].pr_url if not isinstance(fix_entry["job"], dict)
                    else fix_entry["job"].get("pr_url"))) or \
