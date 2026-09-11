@@ -28,3 +28,24 @@ def test_sample_upload_can_conclude_analysis(tmp_path, monkeypatch):
     assert data['files'] == [sample.name]
     saved = client.get(f'/api/log-analyses/{aid}').json()
     assert saved['rca']['root_cause'] == data['root_cause']
+
+    import app.main as dashboard
+    import json
+    registry = incident_registry.IncidentRegistry(str(tmp_path / 'incidents.json'))
+    monkeypatch.setattr(dashboard, '_registry', lambda: registry)
+    monkeypatch.setattr(dashboard, 'SIMULATED_LOGS', [{'scenario': 'other', 'message': 'unrelated'}])
+    replay = client.post(f'/api/logs/{aid}/analyze?mode=replay')
+    assert replay.status_code == 200, replay.text
+    result = replay.json()
+    assert result['source'] == 'SIMULATION'
+    assert result['replayed_records'] == 20
+    assert result['root_cause_category'] == 'configuration_regression'
+    assert registry.get(result['incident_id'])['source'] == 'SIMULATION'
+    original = [json.loads(line) for line in sample.read_text().splitlines()]
+    streamed = [r for r in dashboard.SIMULATED_LOGS if r.get('analysis_id') == aid]
+    assert [r['message'] for r in streamed] == [r['message'] for r in original]
+    assert [r['severity'] for r in streamed] == [r['severity'] for r in original]
+    assert len(dashboard.SIMULATED_LOGS) == 21
+    repeated = client.post(f'/api/logs/{aid}/analyze?mode=replay')
+    assert repeated.status_code == 200
+    assert len(dashboard.SIMULATED_LOGS) == 21

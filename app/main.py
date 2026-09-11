@@ -697,6 +697,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <label><input type="radio" name="up-mode" value="attach" /> Attach to existing incident</label>
                     <input id="up-attach-inc" placeholder="INC-..." style="background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem;width:160px" /><br/>
                     <label><input type="radio" name="up-mode" value="create" /> Create a new incident from these logs</label>
+                    <br/><label><input type="radio" name="up-mode" value="replay" /> Simulate these uploaded logs and run RCA</label>
+                    <p style="color:var(--text-muted);margin-top:6px">Replay uses the uploaded records as simulated telemetry and creates a separate simulation incident.</p>
                 </div>
                 <div style="margin-top:10px"><button class="btn btn-primary" id="up-analyze-btn" onclick="analyzeUpload()">Run RCA</button><p id="upload-analysis-status" role="status"></p></div>
             </div>
@@ -2247,7 +2249,7 @@ async function analyzeUpload(){
   if(!r.ok) throw new Error(d.detail||'Analysis failed');
   const box=document.getElementById('up-results');
   const repoHint=d.no_repo?'<div class="item-box">No repository connected. Connect a Git repository to enable code-level remediation.</div>':'';
-  const modeBadge=d.incident_created===false?'<span class="pill info">Analysis only — no incident created</span>':'<span class="pill info">Evidence Source: Uploaded Logs</span>';
+  const modeBadge=d.mode==='replay'?`<span class="pill warn">SIMULATED · ${d.replayed_records} uploaded records replayed</span>`:d.incident_created===false?'<span class="pill info">Analysis only — no incident created</span>':'<span class="pill info">Evidence Source: Uploaded Logs</span>';
   const convBtn=d.session_id?`<button class="sim-btn" onclick="convertSession('${esc(d.session_id)}')">Convert to Incident</button>`:'';
   const openBtn=d.incident_id&&d.incident_created!==false?`<button class="sim-btn" onclick="go('incidents','${esc(d.incident_id)}')">Open Incident</button>`:'';
   box.innerHTML=`<div class="card"><div class="card-title">RCA Result ${esc(d.incident_id||d.session_id||'')} ${modeBadge}</div>
@@ -4027,6 +4029,7 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
     mode=analyze_only: run RCA, store an AnalysisSession, create NO incident.
     mode=attach: run RCA and link evidence to an existing incident.
     mode=create (legacy default): run RCA and create a LOG_UPLOAD incident.
+    mode=replay: replay uploaded records as telemetry and investigate a separate simulation.
     """
     from ingestion.upload_handler import load_parsed
     from ingestion.normalizer import normalize, summarize, to_evidence_inputs
@@ -4037,6 +4040,8 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
     from orchestration.incident_registry import record_activity
     from orchestration.analysis_sessions import AnalysisSessionStore
     from schemas.incident_source import IncidentSource
+    if mode not in {"analyze_only", "attach", "create", "replay"}:
+        raise HTTPException(status_code=400, detail="Unknown analysis mode")
     analysis = AnalysisStore().get(analysis_id)
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -4047,7 +4052,25 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
     stats = summarize(records)
     service = service or analysis.context.get("service") or (stats["services"][0] if stats["services"] else "unknown-service")
     inputs = to_evidence_inputs(records, service)
-    incident_id = f"INC-UPLOAD-{analysis_id.replace('AN-', '')[:8]}"
+    if mode != "attach":
+        prefix = "INC-REPLAY" if mode == "replay" else "INC-UPLOAD"
+        incident_id = f"{prefix}-{analysis_id.replace('AN-', '')[:8]}"
+    if mode == "replay":
+        # Preserve every uploaded record; never generate a matching canned scenario.
+        inputs["raw_logs"] = [log for offset in range(0, len(records), 2000)
+                              for log in to_evidence_inputs(records[offset:offset + 2000], service)["raw_logs"]]
+        replay = [{**r, "service": r.get("service_name") or service,
+                   "incident_id": incident_id, "analysis_id": analysis_id,
+                   "scenario": "upload-replay", "source": "SIMULATION",
+                   "latency_ms": r.get("latency_ms") or 0,
+                   "cpu_percent": 0, "memory_percent": 0,
+                   "status_code": r.get("status_code") or 200,
+                   "endpoint": r.get("endpoint") or "/unknown"} for r in records]
+        SIMULATED_LOGS[:] = [r for r in SIMULATED_LOGS
+                            if not (r.get("scenario") == "upload-replay" and r.get("analysis_id") == analysis_id)]
+        SIMULATED_LOGS.extend(replay)
+        record_activity("SIMULATION_STARTED", incident_id, "web-user",
+                        f"Replayed {len(replay)} uploaded records", {"analysis_id": analysis_id})
     deps = sorted({r["dependency"] for r in records if r.get("dependency")})
     traces = sorted({r["trace_id"] for r in records if r.get("trace_id")})[:10]
     ev = normalize_evidence(
@@ -4126,7 +4149,7 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
     _registry().ensure(incident_id, project_id=project_id,
                        title=title or f"Uploaded logs RCA ({service})",
                        severity=severity, services=[service],
-                       source=IncidentSource.LOG_UPLOAD.value,
+                       source=IncidentSource.SIMULATION.value if mode == "replay" else IncidentSource.LOG_UPLOAD.value,
                        evidence_source="upload")
     for target in ("COLLECTING_EVIDENCE", "ANALYZING", "ROOT_CAUSE_IDENTIFIED"):
         _bump(incident_id, target)
@@ -4160,8 +4183,8 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
                     "duration_s": duration}
     AnalysisStore().save(analysis)
     out = dict(rca_payload)
-    out.update({"analysis_id": analysis_id, "mode": "create",
-                "incident_id": incident_id, "source": "LOG_UPLOAD",
+    out.update({"analysis_id": analysis_id, "mode": mode,
+                "incident_id": incident_id, "source": "SIMULATION" if mode == "replay" else "LOG_UPLOAD",
                 "evidence_source": "upload",
                 "hypotheses": [h.model_dump() for h in state.hypotheses],
                 "validations": [v.model_dump() for v in
@@ -4169,6 +4192,10 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
                 "files": [f.filename for f in analysis.files],
                 "record_count": stats["record_count"],
                 "time_range": [stats["time_start"], stats["time_end"]]})
+    if mode == "replay":
+        out["replayed_records"] = len(records)
+        analysis.rca = out
+        AnalysisStore().save(analysis)
     return out
 
 

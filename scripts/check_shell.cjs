@@ -20,7 +20,8 @@ const {chromium} = require('playwright');
       if(url.pathname==='/api/logs/AN-TEST/analyze'){
         analysisAttempts++;
         if(analysisAttempts===1) return route.fulfill({status:500,body:'Temporary server error'});
-        return route.fulfill({contentType:'application/json',body:JSON.stringify({incident_created:false,session_id:'AS-TEST',root_cause:'Missing payment configuration',confidence:0.8,record_count:20,files:['checkout_config_regression.jsonl']})});
+        const replay=url.searchParams.get('mode')==='replay';
+        return route.fulfill({contentType:'application/json',body:JSON.stringify({mode:replay?'replay':'analyze_only',replayed_records:replay?20:undefined,incident_created:replay,session_id:replay?null:'AS-TEST',incident_id:replay?'INC-REPLAY-TEST':null,root_cause:'Missing payment configuration',confidence:0.8,record_count:20,files:['checkout_config_regression.jsonl']})});
       }
       if(!url.pathname.startsWith('/api/') && url.pathname!='/health') return route.fulfill({body:''});
       assert.equal(route.request().method(),'GET','Layout checks must never execute actions');
@@ -92,6 +93,9 @@ const {chromium} = require('playwright');
     await page.locator('#up-analyze-btn').click();
     await page.waitForFunction(()=>document.getElementById('upload-analysis-status').textContent==='Analysis complete.');
     assert.ok((await page.locator('#up-results').innerText()).includes('Missing payment configuration'));
+    await page.locator('input[name="up-mode"][value="replay"]').check();
+    await page.locator('#up-analyze-btn').click();
+    await page.waitForFunction(()=>document.getElementById('up-results').textContent.includes('20 uploaded records replayed'));
     await page.evaluate(()=>{LOGS=[];updateRcaGate();});
     assert.equal(await page.locator('#rca-btn-top').isDisabled(),true);
     await page.evaluate(()=>{LOGS=[{message:'Fixture evidence'}];updateRcaGate();});
