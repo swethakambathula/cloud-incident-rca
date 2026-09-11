@@ -96,7 +96,7 @@ const {chromium} = require('playwright');
     await page.locator('input[name="up-mode"][value="replay"]').check();
     await page.locator('#up-analyze-btn').click();
     await page.waitForFunction(()=>document.getElementById('up-results').textContent.includes('20 uploaded records replayed'));
-    await page.evaluate(()=>{LOGS=[];updateRcaGate();});
+    await page.evaluate(()=>{LAST_INCIDENT=null;LOGS=[];updateRcaGate();});
     assert.equal(await page.locator('#rca-btn-top').isDisabled(),true);
     await page.evaluate(()=>{LOGS=[{message:'Fixture evidence'}];updateRcaGate();});
     assert.equal(await page.locator('#rca-btn-top').isEnabled(),true);

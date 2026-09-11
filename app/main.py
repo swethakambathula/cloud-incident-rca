@@ -721,7 +721,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </main>
 </div>
 <script>
-let currentIncident='incident_001_db_timeout.json';
+let currentIncident=null;
 let liveIncidentFile=null;
 let liveScenario=null;
 let LAST_INCIDENT=null;
@@ -731,8 +731,9 @@ let _lastSumSig='';
 
 async function simulate(scenario){
   const btn=document.getElementById('live-status'); btn.innerHTML='<span class="status-dot dot-red"></span>Injecting...';
-  const res=await fetch('/api/simulate/'+scenario,{method:'POST'});
+  const res=await fetch('/api/simulate/'+scenario,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({incident_id:LAST_INCIDENT})});
   const data=await res.json();
+  if(!res.ok){ btn.textContent=data.detail||'Simulation unavailable for this incident'; return; }
   liveScenario=data.scenario;
   if(data.incident_file){ liveIncidentFile=data.incident_file; currentIncident=data.incident_file; }
   else{ liveIncidentFile=null; }
@@ -954,12 +955,14 @@ async function runLiveRCA(){
   updateRcaGate();
   renderProgress([]);
   if(LAST_INCIDENT){ clearInterval(PROG_TIMER); PROG_TIMER=setInterval(async()=>{ try{ const p=await (await fetch('/api/incidents/'+LAST_INCIDENT+'/rca-progress')).json(); if(p.events) renderProgress(p.events); }catch(e){} },800); }
-  const target=liveIncidentFile||currentIncident;
-  // Use multi-agent live endpoint whenever a simulation ran, else static file
-  const useLive=!!(liveScenario||liveIncidentFile);
-  const url=useLive?'/api/rca/live':'/api/analyze/'+target;
-  const res=await fetch(url,{method: useLive?'POST':'GET'});
+  const selectedIncident=LAST_INCIDENT;
+  const useLive=false;
+  try{
+  if(!selectedIncident) throw new Error('Select an incident or analyze uploaded logs first.');
+  const res=await fetch('/api/incidents/'+encodeURIComponent(selectedIncident)+'/rca',{method:'POST'});
   const data=await res.json();
+  if(!res.ok) throw new Error(data.detail||'RCA failed');
+  if(LAST_INCIDENT!==selectedIncident) return;
   // Normalize both response shapes
   const rca=data.root_cause?data:data;
   // For live, data contains remediation_plan+approval
@@ -978,6 +981,13 @@ async function runLiveRCA(){
     refreshPreflight();
     document.getElementById('cf-investigation').innerHTML='<span style="color:var(--text-muted);font-size:.85rem">RCA complete. Click Generate Fix to inspect code and propose a patch — nothing is created until you approve.</span>';
     document.getElementById('cf-diff-wrap').style.display='none';
+  }
+  }catch(e){ document.getElementById('rca-gate-top').textContent=e.message; }
+  finally{
+    clearInterval(PROG_TIMER);
+    btn.disabled=false; btn.innerText='Run Live RCA';
+    document.getElementById('rca-btn-top').disabled=false;
+    document.getElementById('rca-btn-top').innerText='Run RCA';
   }
 }
 async function refreshPreflight(){
@@ -1425,14 +1435,15 @@ function showIncidentTable(){
 async function openIncident(incident_id){
   const meta=(INCIDENTS||[]).find(c=>c.incident_id===incident_id);
   LAST_INCIDENT=incident_id;
+  currentIncident=meta&&meta.file||null;
+  liveIncidentFile=null; liveScenario=null;
   document.getElementById('incidents-table-wrap').style.display='none';
   document.getElementById('incident-workspace').style.display='block';
   document.getElementById('inv-tabs').style.display='flex';
   renderHero(incident_id);
   switchInvTab('summary');
   setCrumbs([['Home',()=>go('home')],['Incidents',()=>{go('incidents');}],[incident_id,null]]);
-  if(meta&&meta.file){ await analyzeStatic(meta.file); }
-  else{
+  {
     document.getElementById('inc-title').innerText='Incident: '+incident_id;
     document.getElementById('inc-desc').innerText='Run RCA to investigate, or review past runs below.';
     LAST_INCIDENT=incident_id;
@@ -1959,7 +1970,7 @@ function updateRcaGate(){
     return;
   }
   const gate=document.getElementById('rca-gate');
-  if(!LOGS.length){ btn.disabled=true; if(gate) gate.innerText='Waiting for sufficient evidence: no logs collected yet. Simulate an incident or upload logs first.'; }
+  if(!LOGS.length&&!LAST_INCIDENT){ btn.disabled=true; if(gate) gate.innerText='Select an incident or upload logs first.'; }
   else{ btn.disabled=false; if(gate) gate.innerText='Run the RCA agent against the currently collected incident evidence. The agent will correlate logs, metrics, deployments, traces, infrastructure state, and code changes before proposing a root cause.'; }
   if(top){ top.disabled=btn.disabled; top.innerText='Run RCA'; }
   if(hint) hint.innerText=btn.disabled?'Simulate an incident or upload logs to enable RCA.':'';
@@ -2257,6 +2268,7 @@ async function analyzeUpload(){
     <div style="font-size:.8rem;color:var(--text-muted)">Files: ${esc((d.files||[]).join(', '))} · Records: ${d.record_count} · Range: ${esc((d.time_range||[])[0]||'')} → ${esc((d.time_range||[])[1]||'')}</div>
     <div style="margin-top:8px"><strong>Supporting</strong>${(d.supporting_evidence||[]).map(e=>`<div class="evidence-box">✔ ${esc(e)}</div>`).join('')}</div>
     <div><strong>Contradictory</strong>${(d.contradictory_evidence||[]).map(e=>`<div class="evidence-box">✖ ${esc(e)}</div>`).join('')||'<p style="color:var(--text-muted)">None</p>'}</div>
+    <div style="margin-top:12px"><strong>Recommendations</strong><p>${esc(d.recommended_action||d.recommended_next_action||'No recommendation returned.')}</p></div>
     <div><strong>Timeline</strong>${(d.timeline||[]).map(t=>`<div style="font-size:.78rem">${esc(t.timestamp)} [${esc(t.event_type)}] ${esc(t.description)}</div>`).join('')}</div>
     ${repoHint}
     <div style="margin-top:8px">${openBtn} ${convBtn}</div></div>`;
@@ -2572,16 +2584,25 @@ def logs_summary():
     return summary
 
 @app.post("/api/simulate/{scenario}")
-def simulate_error(scenario: str):
+def simulate_error(scenario: str, body: dict = None):
     from tools.live_log_generator import SCENARIO_SPECS, generate_logs, summarize
     if scenario not in SCENARIO_SPECS:
         raise HTTPException(status_code=400, detail=f"Unknown scenario {scenario}. Choose {sorted(SCENARIO_SPECS)}")
     spec = SCENARIO_SPECS[scenario]
     incident_file = SCENARIO_MAP.get(scenario)
+    selected_id = (body or {}).get("incident_id")
+    if selected_id:
+        matching_id = None
+        if incident_file:
+            path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "incidents", incident_file)
+            with open(path, encoding="utf-8") as source:
+                matching_id = json.load(source).get("incident_id")
+        if selected_id not in {matching_id, f"INC-LIVE-{spec['incident_type']}"}:
+            raise HTTPException(status_code=409, detail="This simulation does not match the selected incident. Uploaded logs should be analyzed directly.")
     global LATEST_SIMULATED_FILE, LATEST_SCENARIO
     LATEST_SIMULATED_FILE = incident_file
     LATEST_SCENARIO = scenario
-    incident_id = f"INC-LIVE-{spec['incident_type']}"
+    incident_id = selected_id or f"INC-LIVE-{spec['incident_type']}"
     # Baseline + incident phases streamed as structured logs
     new_logs = generate_logs(scenario, incident_id=incident_id)
     bucket = None
@@ -2650,6 +2671,24 @@ def _manual_evidence(incident_id: str, inputs: dict):
         dependencies=[], revision_name=inputs.get("revision") or None, region="")
 
 
+@app.post("/api/incidents/{incident_id}/rca")
+async def run_selected_incident_rca(incident_id: str):
+    """Resolve evidence for this incident only; never fall back to the latest demo."""
+    from projects.store import AnalysisStore
+    for analysis in AnalysisStore().list():
+        if (analysis.rca or {}).get("incident_id") == incident_id:
+            mode = "replay" if (analysis.rca or {}).get("mode") == "replay" else "attach"
+            return await analyze_upload(analysis.analysis_id, mode=mode, incident_id=incident_id)
+    if incident_id in MANUAL_EVIDENCE or incident_id in LAST_INVESTIGATION or any(l.get("incident_id") == incident_id for l in SIMULATED_LOGS):
+        return await run_live_rca({"incident_id": incident_id})
+    base = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "incidents")
+    for path in glob.glob(os.path.join(base, "*.json")):
+        with open(path, encoding="utf-8") as source:
+            if json.load(source).get("incident_id") == incident_id:
+                return await analyze_incident_api(os.path.basename(path))
+    raise HTTPException(status_code=400, detail="No evidence is linked to this incident. Upload and attach its logs before running RCA.")
+
+
 @app.post("/api/rca/live")
 async def run_live_rca(body: dict = None):
     # Fresh investigation from the LIVE log stream (Part 4). Static files only
@@ -2668,6 +2707,28 @@ async def run_live_rca(body: dict = None):
     if manual_id and manual_id in MANUAL_EVIDENCE:
         ev = _manual_evidence(manual_id, MANUAL_EVIDENCE[manual_id])
         live_logs, evidence_source = [], "manual"
+    elif manual_id and any(l.get("incident_id") == manual_id for l in SIMULATED_LOGS):
+        live_logs = [l for l in SIMULATED_LOGS if l.get("incident_id") == manual_id]
+        selected_scenario = live_logs[-1].get("scenario")
+        selected_file = SCENARIO_MAP.get(selected_scenario)
+        if selected_file:
+            path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "incidents", selected_file)
+            with open(path, encoding="utf-8") as source:
+                data = merge_static_with_live(json.load(source), live_logs)
+            data["incident_id"] = manual_id
+            ev = IncidentEvidence(**data)
+        else:
+            from tools.live_log_generator import SCENARIO_SPECS
+            if selected_scenario not in SCENARIO_SPECS:
+                raise HTTPException(status_code=400, detail="Analyze this incident's uploaded logs directly")
+            ev = build_evidence_from_logs(selected_scenario, live_logs)
+        evidence_source = "incident"
+    elif manual_id and manual_id in LAST_INVESTIGATION:
+        ev = LAST_INVESTIGATION[manual_id]["state"].incident_evidence
+        live_logs = [l for l in SIMULATED_LOGS if l.get("incident_id") == manual_id]
+        evidence_source = "incident"
+    elif manual_id:
+        raise HTTPException(status_code=400, detail="No evidence for the requested incident")
     elif incident_file:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         file_path = os.path.join(base_dir, "data", "incidents", incident_file)
@@ -2714,7 +2775,7 @@ async def run_live_rca(body: dict = None):
     result["validations"] = [v.model_dump() for v in
                              state.validated_hypotheses + state.rejected_hypotheses]
     # add simulated logs hint
-    result["live_logs_count"] = len(SIMULATED_LOGS)
+    result["live_logs_count"] = len(live_logs)
     result["remediation_available"] = True
     result["progress"] = list(LAST_PROGRESS.get(ev.incident_id, []))
     # remember validated RCA for the code-fix pipeline (Part 5+)

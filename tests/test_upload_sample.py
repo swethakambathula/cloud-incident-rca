@@ -46,6 +46,14 @@ def test_sample_upload_can_conclude_analysis(tmp_path, monkeypatch):
     assert [r['message'] for r in streamed] == [r['message'] for r in original]
     assert [r['severity'] for r in streamed] == [r['severity'] for r in original]
     assert len(dashboard.SIMULATED_LOGS) == 21
+    unknown = client.post('/api/incidents/INC-NO-EVIDENCE/rca')
+    assert unknown.status_code == 400
+    wrong_simulation = client.post('/api/simulate/db-timeout', json={'incident_id':result['incident_id']})
+    assert wrong_simulation.status_code == 409
+    scoped = client.post(f"/api/incidents/{result['incident_id']}/rca")
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()['incident_id'] == result['incident_id']
+    assert scoped.json()['root_cause_category'] == 'configuration_regression'
     repeated = client.post(f'/api/logs/{aid}/analyze?mode=replay')
     assert repeated.status_code == 200
     assert len(dashboard.SIMULATED_LOGS) == 21
