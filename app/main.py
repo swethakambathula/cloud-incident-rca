@@ -688,7 +688,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div><label>Environment (optional)</label><input id="up-env" placeholder="prod" /></div>
                 </div>
                 <div><label>Incident Description (optional)</label><textarea id="up-desc" rows="2"></textarea></div>
-                <div style="margin-top:10px"><button class="btn btn-primary" id="up-btn" onclick="uploadLogs()">Upload &amp; Preview</button></div>
+                <div style="margin-top:10px"><button class="btn btn-primary" id="up-btn" onclick="uploadLogs()">Upload &amp; Preview</button><p id="upload-status" role="status"></p></div>
             </div>
             <div class="card" id="up-preview-card" style="display:none"><div class="card-title">2 · Ingestion Preview</div><div id="up-preview"></div>
                 <div style="margin-top:10px;font-size:.82rem">
@@ -698,7 +698,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <input id="up-attach-inc" placeholder="INC-..." style="background:#20242a;color:var(--text-main);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:.78rem;width:160px" /><br/>
                     <label><input type="radio" name="up-mode" value="create" /> Create a new incident from these logs</label>
                 </div>
-                <div style="margin-top:10px"><button class="btn btn-primary" id="up-analyze-btn" onclick="analyzeUpload()">Run RCA</button></div>
+                <div style="margin-top:10px"><button class="btn btn-primary" id="up-analyze-btn" onclick="analyzeUpload()">Run RCA</button><p id="upload-analysis-status" role="status"></p></div>
             </div>
             <div id="up-results"></div>
             <div class="card"><div class="card-title">Log Analyses</div><div id="analyses-list"></div></div>
@@ -2204,6 +2204,8 @@ async function uploadLogs(){
   const inp=document.getElementById('up-files');
   if(!inp.files.length){ alert('Choose at least one log file'); return; }
   const btn=document.getElementById('up-btn'); btn.disabled=true; btn.innerText='Uploading…';
+  const status=document.getElementById('upload-status'); status.textContent='Uploading logs…';
+  try{
   const fd=new FormData();
   fd.append('project_id',document.getElementById('up-project').value||'unassigned');
   fd.append('source_type',document.getElementById('up-source').value);
@@ -2216,7 +2218,7 @@ async function uploadLogs(){
   const r=await fetch('/api/logs/upload',{method:'POST',body:fd});
   const d=await r.json();
   btn.disabled=false; btn.innerText='Upload & Preview';
-  if(!r.ok){ alert(d.detail||'upload failed'); return; }
+  if(!r.ok) throw new Error(d.detail||'Upload failed');
   UP_ANALYSIS=d.analysis_id;
   const pc=document.getElementById('up-preview-card'); pc.style.display='block';
   document.getElementById('up-preview').innerHTML=
@@ -2224,22 +2226,30 @@ async function uploadLogs(){
     (d.warnings||[]).map(w=>`<div style="font-size:.8rem">⚠ ${esc(w)}</div>`).join('')+
     `<div style="font-size:.8rem;color:var(--text-muted)">Detected services: ${esc((d.preview_stats.services||[]).join(', ')||'—')} · Range: ${esc(d.preview_stats.time_start||'')} → ${esc(d.preview_stats.time_end||'')}</div>`;
   refreshAnalyses();
+  status.textContent='Upload complete. Review the preview and click Run RCA.';
+  document.getElementById('up-analyze-btn').disabled=!d.preview_stats.record_count;
+  pc.scrollIntoView({block:'start'});
+  document.getElementById('up-analyze-btn').focus({preventScroll:true});
+  }catch(e){ status.textContent='Upload failed: '+e.message; }
+  finally{ btn.disabled=false; btn.innerText='Upload & Preview'; }
 }
 async function analyzeUpload(){
-  if(!UP_ANALYSIS) return;
+  if(!UP_ANALYSIS){ document.getElementById('upload-status').textContent='Upload and preview a log file first.'; return; }
   const btn=document.getElementById('up-analyze-btn'); btn.disabled=true; btn.innerText='Analyzing…';
+  const status=document.getElementById('upload-analysis-status'); status.textContent='Analyzing uploaded logs…';
+  try{
   const mode=(document.querySelector('input[name="up-mode"]:checked')||{}).value||'analyze_only';
   const attachId=(document.getElementById('up-attach-inc')||{}).value||'';
   const qs=new URLSearchParams({mode, incident_id:attachId});
   const r=await fetch('/api/logs/'+UP_ANALYSIS+'/analyze?'+qs.toString(),{method:'POST'});
   const d=await r.json();
   btn.disabled=false; btn.innerText='Run RCA';
-  if(!r.ok){ alert(d.detail||'analysis failed'); return; }
+  if(!r.ok) throw new Error(d.detail||'Analysis failed');
   const box=document.getElementById('up-results');
   const repoHint=d.no_repo?'<div class="item-box">No repository connected. Connect a Git repository to enable code-level remediation.</div>':'';
   const modeBadge=d.incident_created===false?'<span class="pill info">Analysis only — no incident created</span>':'<span class="pill info">Evidence Source: Uploaded Logs</span>';
   const convBtn=d.session_id?`<button class="sim-btn" onclick="convertSession('${esc(d.session_id)}')">Convert to Incident</button>`:'';
-  const openBtn=d.incident_id?`<button class="sim-btn" onclick="openIncident('${esc(d.incident_id)}')">Open Incident</button>`:'';
+  const openBtn=d.incident_id&&d.incident_created!==false?`<button class="sim-btn" onclick="go('incidents','${esc(d.incident_id)}')">Open Incident</button>`:'';
   box.innerHTML=`<div class="card"><div class="card-title">RCA Result ${esc(d.incident_id||d.session_id||'')} ${modeBadge}</div>
     <div><strong>${esc(d.root_cause_category||'').toUpperCase()}</strong> ${Math.round((d.confidence||0)*100)}% — ${esc(d.root_cause||'')}</div>
     <div style="font-size:.8rem;color:var(--text-muted)">Files: ${esc((d.files||[]).join(', '))} · Records: ${d.record_count} · Range: ${esc((d.time_range||[])[0]||'')} → ${esc((d.time_range||[])[1]||'')}</div>
@@ -2249,6 +2259,10 @@ async function analyzeUpload(){
     ${repoHint}
     <div style="margin-top:8px">${openBtn} ${convBtn}</div></div>`;
   refreshAnalyses();
+  status.textContent='Analysis complete.';
+  box.scrollIntoView({block:'start'});
+  }catch(e){ status.textContent='Analysis failed: '+e.message+'. You can retry Run RCA.'; }
+  finally{ btn.disabled=false; btn.innerText='Run RCA'; }
 }
 async function convertSession(session_id){
   const title=prompt('Incident title for conversion:','Converted log analysis')||'Converted log analysis';
@@ -2269,6 +2283,16 @@ async function openAnalysis(aid){
   try{
     const a=await (await fetch('/api/log-analyses/'+aid)).json();
     const box=document.getElementById('analysis-detail');
+    if(!a.rca || !a.rca.root_cause){
+      UP_ANALYSIS=aid;
+      const preview=document.getElementById('up-preview-card');
+      preview.style.display='block';
+      document.getElementById('up-preview').textContent=`${a.record_count} uploaded records from ${(a.files||[]).map(f=>f.filename).join(', ')}. Ready for analysis.`;
+      document.getElementById('up-analyze-btn').disabled=!a.record_count;
+      document.getElementById('upload-analysis-status').textContent='';
+      preview.scrollIntoView({block:'start'});
+      return;
+    }
     box.innerHTML=`<div class="card"><div class="card-title">${esc(a.analysis_id)}</div>
       <div style="font-size:.84rem">Project: ${esc(a.project_id)} · Source: ${esc(a.source_type)} · Services: ${esc((a.services||[]).join(', ')||'—')}<br/>Range: ${esc(a.time_start||'')} → ${esc(a.time_end||'')} · Records: ${a.record_count} · Errors: ${(a.error_codes||[]).join(', ')||'—'}</div>
       ${a.rca&&a.rca.root_cause?`<div style="margin-top:8px"><strong>RCA:</strong> ${esc(a.rca.root_cause_category||'')} ${Math.round((a.rca.confidence||0)*100)}% — ${esc(a.rca.root_cause||'')}</div><div><strong>Supporting</strong>${(a.rca.supporting_evidence||[]).map(e=>`<div class="evidence-box">✔ ${esc(e)}</div>`).join('')}</div><div><strong>Contradictory</strong>${(a.rca.contradictory_evidence||[]).map(e=>`<div class="evidence-box">✖ ${esc(e)}</div>`).join('')||'<p style="color:var(--text-muted)">None</p>'}</div><div><strong>Timeline</strong>${(a.rca.timeline||[]).map(t=>`<div style="font-size:.78rem">${esc(t.timestamp)} [${esc(t.event_type)}] ${esc(t.description)}</div>`).join('')}</div>${a.rca.incident_id?`<div style="margin-top:6px"><button class="sim-btn" onclick="openIncident('${esc(a.rca.incident_id)}')">Open Incident</button></div>`:''}`:'<p style="color:var(--text-muted)">Not analyzed yet.</p>'}
@@ -4056,7 +4080,10 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
                    "blast_radius": state.final_report.blast_radius.model_dump(),
                    "recommended_action": state.final_report.recommended_next_action,
                    "domain": domain, "subcategory": sub,
-                   "duration_s": duration}
+                   "duration_s": duration,
+                   "files": [f.filename for f in analysis.files],
+                   "record_count": stats["record_count"],
+                   "time_range": [stats["time_start"], stats["time_end"]]}
     if mode == "analyze_only":
         session = AnalysisSessionStore().create(
             analysis.project_id or project_id or "unassigned", [analysis_id],
@@ -4067,6 +4094,10 @@ async def analyze_upload(analysis_id: str, mode: str = "create",
         out = dict(rca_payload)
         out.update({"analysis_id": analysis_id, "session_id": session["session_id"],
                     "mode": "analyze_only", "incident_created": False})
+        out["incident_id"] = None
+        analysis.status = "analyzed"
+        analysis.rca = out
+        AnalysisStore().save(analysis)
         return out
     if mode == "attach":
         if not incident_id:

@@ -11,10 +11,17 @@ const {chromium} = require('playwright');
     const errors=[];
     page.on('pageerror', e=>errors.push(e.message));
     const html=fs.readFileSync(process.argv[2],'utf8');
+    let analysisAttempts=0;
     const approval={approval_id:'approval-1',incident_id:'INC-006-CONFIG-REGRESSION',action:'cloud_run_rollback',status:'APPROVED',risk:'LOW',expiration_time:'2099-01-01T00:00:00Z',decided_by:'operator',decided_at:'2026-09-10T12:00:00Z',decided_message:'Reviewed',target_resource:'checkout-service'};
     await page.route('**/*', async route=>{
       const url=new URL(route.request().url());
       if(url.pathname==='/') return route.fulfill({contentType:'text/html',body:html});
+      if(url.pathname==='/api/logs/upload') return route.fulfill({contentType:'application/json',body:JSON.stringify({analysis_id:'AN-TEST',files:[{filename:'checkout_config_regression.jsonl',record_count:20,size_bytes:5000}],preview_stats:{record_count:20,services:['checkout-service']},warnings:[]})});
+      if(url.pathname==='/api/logs/AN-TEST/analyze'){
+        analysisAttempts++;
+        if(analysisAttempts===1) return route.fulfill({status:500,body:'Temporary server error'});
+        return route.fulfill({contentType:'application/json',body:JSON.stringify({incident_created:false,session_id:'AS-TEST',root_cause:'Missing payment configuration',confidence:0.8,record_count:20,files:['checkout_config_regression.jsonl']})});
+      }
       if(!url.pathname.startsWith('/api/') && url.pathname!='/health') return route.fulfill({body:''});
       assert.equal(route.request().method(),'GET','Layout checks must never execute actions');
       let data=[];
@@ -74,6 +81,17 @@ const {chromium} = require('playwright');
       await page.evaluate(a=>renderRemediation({action:a.action},a,'ALLOWED_WITH_APPROVAL'),{...approval,...extra});
       assert.equal(await page.locator('#remediation-box button').filter({hasText:'Execute & Verify'}).count(),0);
     }
+    await page.evaluate(()=>showView('analyze'));
+    await page.locator('#up-files').setInputFiles(path.join(__dirname,'../data/test_logs/checkout_config_regression.jsonl'));
+    await page.locator('#up-btn').click();
+    await page.waitForFunction(()=>document.getElementById('upload-status').textContent.includes('Upload complete'));
+    assert.equal(await page.locator('#up-analyze-btn').isVisible(),true);
+    await page.locator('#up-analyze-btn').click();
+    await page.waitForFunction(()=>document.getElementById('upload-analysis-status').textContent.includes('Analysis failed'));
+    assert.equal(await page.locator('#up-analyze-btn').isEnabled(),true);
+    await page.locator('#up-analyze-btn').click();
+    await page.waitForFunction(()=>document.getElementById('upload-analysis-status').textContent==='Analysis complete.');
+    assert.ok((await page.locator('#up-results').innerText()).includes('Missing payment configuration'));
     await page.evaluate(()=>{LOGS=[];updateRcaGate();});
     assert.equal(await page.locator('#rca-btn-top').isDisabled(),true);
     await page.evaluate(()=>{LOGS=[{message:'Fixture evidence'}];updateRcaGate();});
